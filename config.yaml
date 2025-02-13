@@ -1,0 +1,143 @@
+# Default headers and User-Agent configuration
+user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+default_headers:
+  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"
+  Accept-Language: "en-US,en;q=0.9"
+  Accept-Encoding: "gzip, deflate"
+  Connection: "keep-alive"
+  Cache-Control: "no-cache"
+  Pragma: "no-cache"
+
+# Test URL configuration
+test_urls:
+  default_url: "https://www.google.com"  # Used when no custom URL is provided
+  required_success_count: 2  # Number of successful tests required to consider a proxy working
+  urls:
+    - url: "https://www.google.com"
+      description: "Primary test using Google"
+      required: true  # This URL must work for the proxy to be considered valid
+    - url: "https://www.cloudflare.com"
+      description: "Secondary test using Cloudflare"
+      required: false
+    - url: "https://www.example.com"
+      description: "Basic HTTP test"
+      required: false
+    - url: "http://www.example.com"
+      description: "Plain HTTP test"
+      required: false
+
+# Response validation settings
+validation:
+  require_status_code: 200
+  require_content_match: ""  # Example: "<title>" to ensure it's HTML
+  require_header_fields:
+    - "Content-Type"
+    - "Date"
+  disallowed_keywords:
+    - "Access Denied"
+    - "Proxy Error"
+    - "Bad Gateway"
+    - "Gateway Timeout"
+    - "Service Unavailable"
+  min_response_bytes: 512  # Minimum response size in bytes
+
+# Advanced security checks
+advanced_checks:
+  test_protocol_smuggling: true
+  test_dns_rebinding: true
+  test_cache_poisoning: true  # Enable cache poisoning tests
+  test_host_header_injection: true  # Enable host header injection testing
+  cache_poisoning_methods:
+    - "x-cache-key"      # Test cache key manipulation
+    - "vary-pollution"   # Test Vary header pollution
+    - "method-override"  # Test HTTP method override poisoning
+  test_nonstandard_ports:
+    - 8080
+    - 3128
+    - 8888
+    - 1080
+    - 8118
+  test_ipv6: true
+  test_http_methods:
+    - "GET"
+    - "POST"
+    - "PUT"
+    - "DELETE"
+    - "CONNECT"
+    - "OPTIONS"
+    - "TRACE"
+    - "PATCH"
+  test_path_traversal: true
+
+cloud_providers:
+  - name: AWS
+    metadata_ips:
+      - "169.254.169.254"
+    metadata_urls:
+      - "http://169.254.169.254/latest/meta-data/"
+      - "http://169.254.169.254/latest/dynamic/instance-identity/"
+      - "http://169.254.169.254/latest/user-data/"
+    internal_ranges:
+      - "172.31.0.0/16"
+      - "10.0.0.0/16"
+    asns:
+      - "16509"
+      - "14618"
+      - "38895"
+    org_names:
+      - "AMAZON"
+      - "AWS"
+      - "Amazon Technologies"
+
+  - name: Azure
+    metadata_ips:
+      - "169.254.169.254"
+      - "169.254.169.123"
+    metadata_urls:
+      - "http://169.254.169.254/metadata/instance"
+      - "http://169.254.169.254/metadata/identity"
+    internal_ranges:
+      - "10.0.0.0/16"
+      - "172.16.0.0/12"
+    asns:
+      - "8075"
+      - "8074"
+      - "8073"
+    org_names:
+      - "MICROSOFT"
+      - "AZURE"
+      - "Microsoft Corporation"
+
+  - name: GCP
+    metadata_ips:
+      - "169.254.169.254"
+    metadata_urls:
+      - "http://metadata.google.internal/computeMetadata/v1/"
+      - "http://metadata/computeMetadata/v1/"
+      - "http://metadata.google.internal/"
+    internal_ranges:
+      - "10.128.0.0/9"
+      - "172.16.0.0/12"
+    asns:
+      - "15169"
+      - "396982"
+    org_names:
+      - "GOOGLE"
+      - "GOOGLE-CLOUD"
+      - "Google LLC"
+
+  - name: DigitalOcean
+    metadata_ips:
+      - "169.254.169.254"
+    metadata_urls:
+      - "http://169.254.169.254/metadata/v1/"
+      - "http://169.254.169.254/metadata/v1.json"
+    internal_ranges:
+      - "10.116.0.0/20"
+      - "10.0.0.0/16"
+    asns:
+      - "14061"
+      - "200130"
+    org_names:
+      - "DIGITALOCEAN"
+      - "Digital Ocean" 

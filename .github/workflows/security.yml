@@ -1,0 +1,53 @@
+name: Security Scan
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # Run daily at midnight
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.22'
+        check-latest: true
+        cache: true
+
+    - name: Install security tools
+      run: |
+        go install github.com/securego/gosec/v2/cmd/gosec@latest
+        go install golang.org/x/vuln/cmd/govulncheck@latest
+
+    - name: Run gosec
+      run: |
+        gosec -fmt=json -out=security-report.json ./...
+        gosec ./...
+
+    - name: Run govulncheck
+      run: govulncheck ./...
+
+    - name: Run dependency scan
+      uses: actions/dependency-review-action@v4
+      with:
+        fail-on-severity: high
+
+    - name: Upload security report
+      uses: actions/upload-artifact@v4
+      with:
+        name: security-report
+        path: security-report.json
+        if-no-files-found: error
+
+    - name: Check for critical vulnerabilities
+      run: |
+        if grep -q '"severity": "HIGH"' security-report.json; then
+          echo "Critical security vulnerabilities found!"
+          exit 1
+        fi 

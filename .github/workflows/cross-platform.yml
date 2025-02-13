@@ -1,0 +1,45 @@
+name: Cross-Platform Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        go-version: ['1.21', '1.22']
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go ${{ matrix.go-version }}
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ matrix.go-version }}
+        check-latest: true
+        cache: true
+
+    - name: Install dependencies
+      run: go mod download
+
+    - name: Run tests
+      run: go test -v -race ./tests/...
+
+    - name: Run build
+      run: go build -v ./...
+
+    - name: Test binary (Unix)
+      if: runner.os != 'Windows'
+      run: |
+        ./proxycheck -h || true
+
+    - name: Test binary (Windows)
+      if: runner.os == 'Windows'
+      run: |
+        .\proxycheck.exe -h || true 

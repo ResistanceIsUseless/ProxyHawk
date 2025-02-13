@@ -1,0 +1,62 @@
+name: Test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.22'
+        check-latest: true
+        cache: true
+
+    - name: Install dependencies
+      run: |
+        go mod download
+        go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+        go install github.com/securego/gosec/v2/cmd/gosec@latest
+
+    - name: Run linting
+      run: make lint
+
+    - name: Run tests with coverage
+      run: make coverage
+
+    - name: Run security scan
+      run: make security
+
+    - name: Upload coverage report
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-report
+        path: coverage.html
+        if-no-files-found: error
+
+    - name: Upload test results
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-results
+        path: |
+          test_output.txt
+          test_output.json
+        if-no-files-found: ignore
+
+    - name: Check test coverage
+      run: |
+        COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | tr -d '%')
+        if (( $(echo "$COVERAGE < 80" | bc -l) )); then
+          echo "Test coverage is below 80%: $COVERAGE%"
+          exit 1
+        fi
+        echo "Test coverage is $COVERAGE%" 

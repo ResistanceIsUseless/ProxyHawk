@@ -29,45 +29,25 @@ test_urls:
 # Response validation settings
 validation:
   require_status_code: 200
-  require_content_match: ""  # Example: "<title>" to ensure it's HTML
-  require_header_fields:
-    - "Content-Type"
-    - "Date"
+  require_content_match: ""
+  require_header_fields: []
   disallowed_keywords:
     - "Access Denied"
     - "Proxy Error"
     - "Bad Gateway"
     - "Gateway Timeout"
     - "Service Unavailable"
-  min_response_bytes: 512  # Minimum response size in bytes
+  min_response_bytes: 100
 
 # Advanced security checks
 advanced_checks:
-  test_protocol_smuggling: true
-  test_dns_rebinding: true
-  test_cache_poisoning: true  # Enable cache poisoning tests
-  test_host_header_injection: true  # Enable host header injection testing
-  cache_poisoning_methods:
-    - "x-cache-key"      # Test cache key manipulation
-    - "vary-pollution"   # Test Vary header pollution
-    - "method-override"  # Test HTTP method override poisoning
-  test_nonstandard_ports:
-    - 8080
-    - 3128
-    - 8888
-    - 1080
-    - 8118
-  test_ipv6: true
-  test_http_methods:
-    - "GET"
-    - "POST"
-    - "PUT"
-    - "DELETE"
-    - "CONNECT"
-    - "OPTIONS"
-    - "TRACE"
-    - "PATCH"
-  test_path_traversal: true
+  test_protocol_smuggling: false
+  test_dns_rebinding: false
+  test_ipv6: false
+  test_http_methods: ["GET"]
+  test_path_traversal: false
+  test_cache_poisoning: false
+  test_host_header_injection: false
 
 cloud_providers:
   - name: AWS

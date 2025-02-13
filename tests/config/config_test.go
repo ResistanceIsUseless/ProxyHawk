@@ -1,4 +1,4 @@
-package tests
+package config
 
 import (
 	"testing"
@@ -14,7 +14,7 @@ func TestConfigLoading(t *testing.T) {
 	// Test loading valid config
 	progress.StartTest("Valid Config")
 	t.Run("Valid Config", func(t *testing.T) {
-		err := loadConfig("../config.yaml")
+		err := LoadConfig("../../config.yaml")
 		if err != nil {
 			t.Errorf("Failed to load valid config: %v", err)
 			progress.AddResult(testhelpers.TestResult{
@@ -26,7 +26,8 @@ func TestConfigLoading(t *testing.T) {
 		}
 
 		// Verify config values
-		if len(config.DefaultHeaders) == 0 {
+		cfg := GetConfig()
+		if len(cfg.DefaultHeaders) == 0 {
 			t.Error("Expected default headers to be set")
 			progress.AddResult(testhelpers.TestResult{
 				Name:    "Valid Config",
@@ -36,7 +37,7 @@ func TestConfigLoading(t *testing.T) {
 			return
 		}
 
-		if config.UserAgent == "" {
+		if cfg.UserAgent == "" {
 			t.Error("Expected user agent to be set")
 			progress.AddResult(testhelpers.TestResult{
 				Name:    "Valid Config",
@@ -55,7 +56,7 @@ func TestConfigLoading(t *testing.T) {
 	// Test loading invalid config
 	progress.StartTest("Invalid Config")
 	t.Run("Invalid Config", func(t *testing.T) {
-		err := loadConfig("nonexistent.yaml")
+		err := LoadConfig("nonexistent.yaml")
 		if err == nil {
 			t.Error("Expected error when loading invalid config")
 			progress.AddResult(testhelpers.TestResult{

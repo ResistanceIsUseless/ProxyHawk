@@ -13,26 +13,16 @@ The following issues need to be addressed:
 
 - Concurrent proxy checking using goroutines
 - Configurable number of concurrent checks
-- Configurable timeout settings
-- Measures proxy response time
-- Standard HTTP(S) validation
-- Out-of-Band (OOB) validation using Interactsh
-- Proxy anonymity checking using IPInfo
-- Cloud provider detection and internal network testing
-  - Identifies AWS, Azure, Google Cloud, and DigitalOcean proxies
-  - Tests access to internal cloud networks
-  - Tests metadata service access
+- Support for HTTP, HTTPS, and SOCKS proxies
+- Detailed output with success rate and timing information
+- Optional debug output for troubleshooting
+- Configurable timeouts and retry attempts
+- Custom HTTP headers and User-Agent support
+- Multiple output formats (text, JSON)
+- Proxy anonymity detection
+- Cloud provider detection
+- Internal network testing
 - Advanced security checks
-  - Protocol smuggling detection
-  - DNS rebinding tests
-  - Cache poisoning detection
-  - Non-standard port scanning
-  - IPv6 support testing
-  - HTTP method testing
-  - Path traversal detection
-- Detailed debug output option
-- Detailed success/failure reporting
-- Summary statistics
 
 ## Configuration
 
@@ -81,21 +71,21 @@ go run main.go -l proxies.txt
 ```
 
 ### Command Line Options
-
-- `-l`: File containing proxy list (one per line) (required)
-- `-u`: URL to test proxies against (default: https://www.google.com)
-- `-i`: Enable Interactsh validation for additional OOB testing
-- `-p`: Enable IPInfo validation to check proxy anonymity
-- `-cloud`: Enable cloud provider detection and internal network testing
-- `-config`: Path to configuration file (default: config.yaml)
-- `-c`: Number of concurrent checks (default: 10)
-- `-t`: Timeout for each proxy check (default: 10s)
-- `-d`: Enable debug output (shows full request/response details)
-- `-o`: Output results to text file (includes all details and summary)
-- `-j`: Output results to JSON file (structured format for programmatic use)
-- `-wp`: Output only working proxies to a text file (format: proxy - speed)
-- `-wpa`: Output only working anonymous proxies to a text file (format: proxy - speed)
-
+```
+- -l: File containing proxy list (one per line) (required)
+- -u: URL to test proxies against (default: https://www.google.com)
+- -i: Enable Interactsh validation for additional OOB testing
+- -p: Enable IPInfo validation to check proxy anonymity
+- -cloud: Enable cloud provider detection and internal network testing
+- -config: Path to configuration file (default: config.yaml)
+- -c: Number of concurrent checks (default: 10)
+- -t`: Timeout for each proxy check (default: 10s)
+- -d: Enable debug output (shows full request/response details)
+- -o: Output results to text file (includes all details and summary)
+- -j: Output results to JSON file (structured format for programmatic use)
+- -wp: Output only working proxies to a text file (format: proxy - speed)
+- -wpa: Output only working anonymous proxies to a text file (format: proxy - speed)
+```
 ### Example Commands
 
 Basic check against default URL:

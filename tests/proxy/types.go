@@ -1,4 +1,4 @@
-package tests
+package proxy
 
 import (
 	"net/http"
@@ -34,28 +34,33 @@ type SummaryOutput struct {
 	Results             []ProxyResultOutput `json:"results"`
 }
 
-// Config represents the application configuration
-type Config struct {
-	CloudProviders []CloudProvider   `yaml:"cloud_providers"`
-	DefaultHeaders map[string]string `yaml:"default_headers"`
-	UserAgent      string            `yaml:"user_agent"`
-	Validation     struct {
-		RequireStatusCode   int      `yaml:"require_status_code"`
-		RequireContentMatch string   `yaml:"require_content_match"`
-		RequireHeaderFields []string `yaml:"require_header_fields"`
-		DisallowedKeywords  []string `yaml:"disallowed_keywords"`
-		MinResponseBytes    int      `yaml:"min_response_bytes"`
-		AdvancedChecks      struct {
-			TestProtocolSmuggling   bool     `yaml:"test_protocol_smuggling"`
-			TestDNSRebinding        bool     `yaml:"test_dns_rebinding"`
-			TestNonStandardPorts    []int    `yaml:"test_nonstandard_ports"`
-			TestIPv6                bool     `yaml:"test_ipv6"`
-			TestHTTPMethods         []string `yaml:"test_http_methods"`
-			TestPathTraversal       bool     `yaml:"test_path_traversal"`
-			TestCachePoisoning      bool     `yaml:"test_cache_poisoning"`
-			TestHostHeaderInjection bool     `yaml:"test_host_header_injection"`
-		} `yaml:"advanced_checks"`
-	} `yaml:"validation"`
+// ProxyResult represents the result of a proxy check
+type ProxyResult struct {
+	Proxy          string
+	Working        bool
+	Speed          time.Duration
+	Error          error
+	InteractshTest bool
+	DebugInfo      string
+	RealIP         string
+	ProxyIP        string
+	IsAnonymous    bool
+	CloudProvider  *CloudProvider
+	InternalAccess bool
+	MetadataAccess bool
+	AdvancedChecks *AdvancedCheckResult
+	TestResults    map[string]bool
+	CheckResults   []CheckResult
+}
+
+// CheckResult represents the result of a single proxy check
+type CheckResult struct {
+	URL        string
+	Success    bool
+	Speed      time.Duration
+	Error      string
+	StatusCode int
+	BodySize   int64
 }
 
 // CloudProvider represents a cloud provider configuration
@@ -66,6 +71,57 @@ type CloudProvider struct {
 	InternalRanges []string `yaml:"internal_ranges"`
 	ASNs           []string `yaml:"asns"`
 	OrgNames       []string `yaml:"org_names"`
+}
+
+// AdvancedCheckResult represents the results of advanced proxy checks
+type AdvancedCheckResult struct {
+	ProtocolSmuggling   bool              `yaml:"protocol_smuggling"`
+	DNSRebinding        bool              `yaml:"dns_rebinding"`
+	NonStandardPorts    map[int]bool      `yaml:"nonstandard_ports"`
+	IPv6Supported       bool              `yaml:"ipv6_supported"`
+	MethodSupport       map[string]bool   `yaml:"method_support"`
+	PathTraversal       bool              `yaml:"path_traversal"`
+	CachePoisoning      bool              `yaml:"cache_poisoning"`
+	HostHeaderInjection bool              `yaml:"host_header_injection"`
+	VulnDetails         map[string]string `yaml:"vuln_details"`
+}
+
+// Config represents the application configuration
+type Config struct {
+	CloudProviders []CloudProvider   `yaml:"cloud_providers"`
+	DefaultHeaders map[string]string `yaml:"default_headers"`
+	UserAgent      string            `yaml:"user_agent"`
+	TestURLs       TestURLConfig     `yaml:"test_urls"`
+	Validation     struct {
+		RequireStatusCode   int      `yaml:"require_status_code"`
+		RequireContentMatch string   `yaml:"require_content_match"`
+		RequireHeaderFields []string `yaml:"require_header_fields"`
+		DisallowedKeywords  []string `yaml:"disallowed_keywords"`
+		MinResponseBytes    int      `yaml:"min_response_bytes"`
+		AdvancedChecks      struct {
+			TestProtocolSmuggling   bool     `yaml:"test_protocol_smuggling"`
+			TestDNSRebinding        bool     `yaml:"test_dns_rebinding"`
+			TestIPv6                bool     `yaml:"test_ipv6"`
+			TestHTTPMethods         []string `yaml:"test_http_methods"`
+			TestPathTraversal       bool     `yaml:"test_path_traversal"`
+			TestCachePoisoning      bool     `yaml:"test_cache_poisoning"`
+			TestHostHeaderInjection bool     `yaml:"test_host_header_injection"`
+		} `yaml:"advanced_checks"`
+	} `yaml:"validation"`
+}
+
+// TestURLConfig represents the test URL configuration
+type TestURLConfig struct {
+	DefaultURL           string    `yaml:"default_url"`
+	RequiredSuccessCount int       `yaml:"required_success_count"`
+	URLs                 []TestURL `yaml:"urls"`
+}
+
+// TestURL represents a test URL configuration
+type TestURL struct {
+	URL         string `yaml:"url"`
+	Description string `yaml:"description"`
+	Required    bool   `yaml:"required"`
 }
 
 // Functions that need to be implemented in the main package

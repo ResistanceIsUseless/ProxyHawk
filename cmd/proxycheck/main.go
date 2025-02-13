@@ -476,7 +476,6 @@ type Config struct {
 		AdvancedChecks      struct {
 			TestProtocolSmuggling   bool     `yaml:"test_protocol_smuggling"`
 			TestDNSRebinding        bool     `yaml:"test_dns_rebinding"`
-			TestNonStandardPorts    []int    `yaml:"test_nonstandard_ports"`
 			TestIPv6                bool     `yaml:"test_ipv6"`
 			TestHTTPMethods         []string `yaml:"test_http_methods"`
 			TestPathTraversal       bool     `yaml:"test_path_traversal"`
@@ -522,7 +521,6 @@ func loadConfig(filename string) error {
 				AdvancedChecks      struct {
 					TestProtocolSmuggling   bool     `yaml:"test_protocol_smuggling"`
 					TestDNSRebinding        bool     `yaml:"test_dns_rebinding"`
-					TestNonStandardPorts    []int    `yaml:"test_nonstandard_ports"`
 					TestIPv6                bool     `yaml:"test_ipv6"`
 					TestHTTPMethods         []string `yaml:"test_http_methods"`
 					TestPathTraversal       bool     `yaml:"test_path_traversal"`
@@ -544,7 +542,6 @@ func loadConfig(filename string) error {
 				AdvancedChecks: struct {
 					TestProtocolSmuggling   bool     `yaml:"test_protocol_smuggling"`
 					TestDNSRebinding        bool     `yaml:"test_dns_rebinding"`
-					TestNonStandardPorts    []int    `yaml:"test_nonstandard_ports"`
 					TestIPv6                bool     `yaml:"test_ipv6"`
 					TestHTTPMethods         []string `yaml:"test_http_methods"`
 					TestPathTraversal       bool     `yaml:"test_path_traversal"`

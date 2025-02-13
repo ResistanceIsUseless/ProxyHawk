@@ -1,4 +1,4 @@
-module proxycheck
+module github.com/ResistanceIsUseless/ProxyCheck
 
 go 1.22
 

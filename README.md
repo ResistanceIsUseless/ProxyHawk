@@ -11,8 +11,8 @@ The following issues need to be addressed:
 
 ## Installation
 
-```bash
-go install github.com/yourusername/proxycheck@latest
+```
+go install github.com/ResistanceIsUseless/proxycheck@latest
 ```
 
 ## Features

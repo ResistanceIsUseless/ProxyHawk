@@ -2,6 +2,13 @@
 
 A concurrent proxy checker written in Go that can verify multiple proxies simultaneously. It supports standard HTTP(S) checking, Out-of-Band (OOB) validation using Interactsh, proxy anonymity checking using IPInfo, and cloud provider detection with internal network testing.
 
+**This tool is still a work in progress and not all features are available.**
+The following issues need to be addressed:
+- [ ] Get tests working
+- [ ] Tune checking parameters
+- [ ] Clean up output to be more concise
+- [ ] Test advanced security checks
+
 ## Features
 
 - Concurrent proxy checking using goroutines

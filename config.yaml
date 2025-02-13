@@ -19,11 +19,11 @@ test_urls:
     - url: "https://www.cloudflare.com"
       description: "Secondary test using Cloudflare"
       required: false
-    - url: "https://www.example.com"
-      description: "Basic HTTP test"
+    - url: "https://www.microsoft.com"
+      description: "Additional test using Microsoft"
       required: false
-    - url: "http://www.example.com"
-      description: "Plain HTTP test"
+    - url: "https://www.amazon.com"
+      description: "Additional test using Amazon"
       required: false
 
 # Response validation settings

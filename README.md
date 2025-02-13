@@ -9,6 +9,12 @@ The following issues need to be addressed:
 - [ ] Clean up output to be more concise
 - [ ] Test advanced security checks
 
+## Installation
+
+```bash
+go install github.com/yourusername/proxycheck@latest
+```
+
 ## Features
 
 - Concurrent proxy checking using goroutines

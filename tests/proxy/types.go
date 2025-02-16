@@ -126,7 +126,6 @@ type TestURL struct {
 
 // Functions that need to be implemented in the main package
 var (
-	loadConfig                         func(string) error
 	createProxyClient                  func(*url.URL, time.Duration) (*http.Client, error)
 	checkProtocolSmuggling             func(*http.Client, bool) (bool, string)
 	checkDNSRebinding                  func(*http.Client, bool) (bool, string)
@@ -136,6 +135,3 @@ var (
 	writeWorkingProxiesOutput          func(string, []ProxyResultOutput) error
 	writeWorkingAnonymousProxiesOutput func(string, []ProxyResultOutput) error
 )
-
-// Global variables that need to be set from the main package
-var config Config

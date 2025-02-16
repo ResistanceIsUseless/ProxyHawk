@@ -10,22 +10,20 @@ default_headers:
 
 # Test URL configuration
 test_urls:
-  default_url: "https://www.google.com"  # Used when no custom URL is provided
-  required_success_count: 2  # Number of successful tests required to consider a proxy working
+  required_success_count: 1  # Number of successful tests required to consider a proxy working
   urls:
     - url: "https://www.google.com"
-      description: "Primary test using Google"
+      description: "Google connectivity test"
       required: true  # This URL must work for the proxy to be considered valid
     - url: "https://www.cloudflare.com"
-      description: "Secondary test using Cloudflare"
+      description: "Cloudflare connectivity test"
       required: false
-    - url: "https://www.microsoft.com"
-      description: "Additional test using Microsoft"
+    - url: "https://www.apple.com"
+      description: "Apple connectivity test"
       required: false
-    - url: "https://www.amazon.com"
-      description: "Additional test using Amazon"
+    - url: "https://127.0.0.1"
+      description: "Localhost connectivity test"
       required: false
-
 # Response validation settings
 validation:
   require_status_code: 200
@@ -49,6 +47,8 @@ advanced_checks:
   test_cache_poisoning: false
   test_host_header_injection: false
 
+# Cloud provider configuration
+enable_cloud_checks: false
 cloud_providers:
   - name: AWS
     metadata_ips:

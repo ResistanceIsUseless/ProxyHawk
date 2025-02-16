@@ -1,0 +1,136 @@
+✗ http://67.43.228.251:22735 [0/1 checks passed, avg speed: 78ms]
+  ✗ https://ipinfo.io/json - Error: Failed to get IP info: Get "https://ipinfo.io/json": proxyconnect tcp: dial tcp 67.43.228.251:22735: connect: connection refused
+  Error: Failed to get IP info: Get "https://ipinfo.io/json": proxyconnect tcp: dial tcp 67.43.228.251:22735: connect: connection refused
+
+✗ http://67.43.228.251:14447 [0/1 checks passed, avg speed: 81ms]
+  ✗ https://ipinfo.io/json - Error: Failed to get IP info: Get "https://ipinfo.io/json": proxyconnect tcp: dial tcp 67.43.228.251:14447: connect: connection refused
+  Error: Failed to get IP info: Get "https://ipinfo.io/json": proxyconnect tcp: dial tcp 67.43.228.251:14447: connect: connection refused
+
+✗ http://183.234.215.11:8443 [0/1 checks passed, avg speed: 433ms]
+  ✗ https://ipinfo.io/json - Error: Failed to get IP info: Get "https://ipinfo.io/json": Not Allowed
+  Error: Failed to get IP info: Get "https://ipinfo.io/json": Not Allowed
+
+✗ socks4://184.178.172.11:4145 [0/1 checks passed, avg speed: 595ms]
+  ✗ https://ipinfo.io/json - Error: Failed to get IP info: Get "https://ipinfo.io/json": EOF
+  Error: Failed to get IP info: Get "https://ipinfo.io/json": EOF
+
+✗ http://87.248.129.26 [0/1 checks passed, avg speed: 1.125s]
+  ✗ https://ipinfo.io/json - Error: Failed to get IP info: Get "https://ipinfo.io/json": Method Not Allowed
+  Error: Failed to get IP info: Get "https://ipinfo.io/json": Method Not Allowed
+
+✗ http://176.9.239.181 [0/1 checks passed, avg speed: 2.34s]
+  ✗ https://ipinfo.io/json - Error: Failed to get IP info: Get "https://ipinfo.io/json": Bad Request
+  Error: Failed to get IP info: Get "https://ipinfo.io/json": Bad Request
+
+✗ http://121.177.128.206:3053 [0/1 checks passed, avg speed: 5s]
+  ✗ https://ipinfo.io/json - Error: Failed to get IP info: Get "https://ipinfo.io/json": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+  Error: Failed to get IP info: Get "https://ipinfo.io/json": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+
+✗ http://27.189.132.62:8089 [0/1 checks passed, avg speed: 5s]
+  ✗ https://ipinfo.io/json - Error: Failed to get IP info: Get "https://ipinfo.io/json": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+  Error: Failed to get IP info: Get "https://ipinfo.io/json": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+
+✗ http://103.151.140.124:10609 [0/1 checks passed, avg speed: 5s]
+  ✗ https://ipinfo.io/json - Error: Failed to get IP info: Get "https://ipinfo.io/json": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+  Error: Failed to get IP info: Get "https://ipinfo.io/json": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+
+✗ http://189.22.234.33 [0/1 checks passed, avg speed: 5.001s]
+  ✗ https://ipinfo.io/json - Error: Failed to get IP info: Get "https://ipinfo.io/json": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+  Error: Failed to get IP info: Get "https://ipinfo.io/json": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+
+✗ http://81.173.44.11:65432 [0/1 checks passed, avg speed: 5s]
+  ✗ https://ipinfo.io/json - Error: Failed to get IP info: Get "https://ipinfo.io/json": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+  Error: Failed to get IP info: Get "https://ipinfo.io/json": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+
+✗ http://198.12.85.213 [0/1 checks passed, avg speed: 174ms]
+  ✗ https://ipinfo.io/json - Error: Failed to get IP info: Get "https://ipinfo.io/json": Service Temporarily Unavailable
+  Error: Failed to get IP info: Get "https://ipinfo.io/json": Service Temporarily Unavailable
+
+✗ http://67.43.227.226:20695 [0/1 checks passed, avg speed: 5s]
+  ✗ https://ipinfo.io/json - Error: Failed to get IP info: Get "https://ipinfo.io/json": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+  Error: Failed to get IP info: Get "https://ipinfo.io/json": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+
+✗ http://125.71.97.77:11105 [0/1 checks passed, avg speed: 367ms]
+  ✗ https://ipinfo.io/json - Error: Failed to get IP info: Get "https://ipinfo.io/json": unexpected EOF
+  Error: Failed to get IP info: Get "https://ipinfo.io/json": unexpected EOF
+
+✗ socks4://8.130.36.245:8090 [0/1 checks passed, avg speed: 5.001s]
+  ✗ https://ipinfo.io/json - Error: Failed to get IP info: Get "https://ipinfo.io/json": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+  Error: Failed to get IP info: Get "https://ipinfo.io/json": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+
+✗ socks4://138.201.33.154:16135 [0/1 checks passed, avg speed: 378ms]
+  ✗ https://ipinfo.io/json - Error: Failed to get IP info: Get "https://ipinfo.io/json": socks connect tcp 138.201.33.154:16135->ipinfo.io:443: unexpected protocol version 1
+  Error: Failed to get IP info: Get "https://ipinfo.io/json": socks connect tcp 138.201.33.154:16135->ipinfo.io:443: unexpected protocol version 1
+
+✗ http://47.91.115.179:8080 [0/1 checks passed, avg speed: 5.002s]
+  ✗ https://ipinfo.io/json - Error: Failed to get IP info: Get "https://ipinfo.io/json": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+  Error: Failed to get IP info: Get "https://ipinfo.io/json": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+
+✗ http://103.152.112.120 [0/1 checks passed, avg speed: 29ms]
+  ✗ https://ipinfo.io/json - Error: Failed to get IP info: Get "https://ipinfo.io/json": Bad Request
+  Error: Failed to get IP info: Get "https://ipinfo.io/json": Bad Request
+
+✗ http://59.37.95.35:8072 [0/1 checks passed, avg speed: 326ms]
+  ✗ https://ipinfo.io/json - Error: Failed to get IP info: Get "https://ipinfo.io/json": Bad Request
+  Error: Failed to get IP info: Get "https://ipinfo.io/json": Bad Request
+
+✗ http://102.214.165.121:1976 [0/1 checks passed, avg speed: 5.001s]
+  ✗ https://ipinfo.io/json - Error: Failed to get IP info: Get "https://ipinfo.io/json": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+  Error: Failed to get IP info: Get "https://ipinfo.io/json": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+
+✗ http://49.76.205.30:8089 [0/1 checks passed, avg speed: 2.178s]
+  ✗ https://ipinfo.io/json - Error: Failed to get IP info: Get "https://ipinfo.io/json": proxyconnect tcp: dial tcp 49.76.205.30:8089: connect: connection refused
+  Error: Failed to get IP info: Get "https://ipinfo.io/json": proxyconnect tcp: dial tcp 49.76.205.30:8089: connect: connection refused
+
+✗ http://Summary [0/1 checks passed, avg speed: 5ms]
+  ✗ https://ipinfo.io/json - Error: Failed to get IP info: Get "https://ipinfo.io/json": proxyconnect tcp: dial tcp: lookup Summary: no such host
+  Error: Failed to get IP info: Get "https://ipinfo.io/json": proxyconnect tcp: dial tcp: lookup Summary: no such host
+
+✗ http://208.87.243.199:7878 [0/1 checks passed, avg speed: 5s]
+  ✗ https://ipinfo.io/json - Error: Failed to get IP info: Get "https://ipinfo.io/json": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+  Error: Failed to get IP info: Get "https://ipinfo.io/json": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+
+✗ socks4://117.74.65.207:80 [0/1 checks passed, avg speed: 5s]
+  ✗ https://ipinfo.io/json - Error: Failed to get IP info: Get "https://ipinfo.io/json": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+  Error: Failed to get IP info: Get "https://ipinfo.io/json": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+
+✗ http://200.205.60.2:8080 [0/1 checks passed, avg speed: 5s]
+  ✗ https://ipinfo.io/json - Error: Failed to get IP info: Get "https://ipinfo.io/json": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+  Error: Failed to get IP info: Get "https://ipinfo.io/json": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+
+✗ http://113.108.13.120:4433 [0/1 checks passed, avg speed: 5.001s]
+  ✗ https://ipinfo.io/json - Error: Failed to get IP info: Get "https://ipinfo.io/json": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+  Error: Failed to get IP info: Get "https://ipinfo.io/json": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+
+✗ http://103.10.231.189:8080 [0/1 checks passed, avg speed: 5.001s]
+  ✗ https://ipinfo.io/json - Error: Failed to get IP info: Get "https://ipinfo.io/json": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+  Error: Failed to get IP info: Get "https://ipinfo.io/json": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+
+✗ http://103.56.206.48:1691 [0/1 checks passed, avg speed: 5.003s]
+  ✗ https://ipinfo.io/json - Error: Failed to get IP info: Get "https://ipinfo.io/json": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+  Error: Failed to get IP info: Get "https://ipinfo.io/json": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+
+✗ http://5.135.103.166 [0/1 checks passed, avg speed: 5.001s]
+  ✗ https://ipinfo.io/json - Error: Failed to get IP info: Get "https://ipinfo.io/json": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+  Error: Failed to get IP info: Get "https://ipinfo.io/json": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+
+✓ socks4://192.252.208.67:14287 [4/5 checks passed, avg speed: 2.609s]
+  ✓ https://ipinfo.io/json - Status: 200, Speed: 1.171s
+  ✗ https://www.google.com - Error: Failed to read response: context deadline exceeded (Client.Timeout or context cancellation while reading body)
+  ✓ https://www.cloudflare.com - Status: 200, Speed: 3.744s
+  ✓ https://www.microsoft.com - Status: 200, Speed: 2.178s
+  ✓ https://www.amazon.com - Status: 202, Speed: 951ms
+
+✗ http://115.74.6.48:10008 [1/5 checks passed, avg speed: 4.93s]
+  ✓ https://ipinfo.io/json - Status: 200, Speed: 4.645s
+  ✗ https://www.google.com - Error: Request failed: Get "https://www.google.com": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+  ✗ https://www.cloudflare.com - Error: Request failed: Get "https://www.cloudflare.com": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+  ✗ https://www.microsoft.com - Error: Request failed: Get "https://www.microsoft.com": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+  ✗ https://www.amazon.com - Error: Request failed: Get "https://www.amazon.com": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+
+
+Summary:
+Total proxies checked: 31
+Working proxies: 1
+Failed proxies: 30
+Success rate: 3.23%

@@ -4,13 +4,7 @@ This directory contains the test suite for the ProxyCheck application. The tests
 
 ## Test Structure
 
-- `init_test.go`: Test environment setup and cleanup
-- `types.go`: Common types and interfaces used across tests
-- `proxy_test.go`: Tests for basic proxy validation functionality
-- `security_test.go`: Tests for advanced security checks
-- `output_test.go`: Tests for output formatting
-- `config_test.go`: Tests for configuration loading
-- `working_proxies_test.go`: Tests for working proxies output
+- `proxy/benchmark_test.go`: Benchmark tests for proxy validation using real-world proxy lists
 
 ## Running Tests
 
@@ -18,67 +12,78 @@ From the project root directory:
 
 ```bash
 # Run all tests
-make test
+go test ./tests/...
 
-# Run tests with coverage report
-make coverage
+# Run benchmark tests
+go test ./tests/proxy -bench=.
 
-# Run a specific test
-make test-one test=TestName
+# Run benchmark tests with verbose output
+go test ./tests/proxy -bench=. -v
 
-# Run tests in verbose mode
-make test-verbose
+# Run benchmark tests with custom timeout (default is 10m)
+go test ./tests/proxy -bench=. -timeout 20m
+```
 
-# Run short tests (skip long running tests)
-make test-short
+## Benchmark Tests
+
+The benchmark suite includes:
+
+### ProxyScrape API Benchmark (`BenchmarkProxyScrapeChecking`)
+
+Tests proxy validation using the ProxyScrape API. The benchmark:
+
+1. Fetches proxies from ProxyScrape's free proxy list API
+2. Validates each proxy against a public endpoint (Google)
+3. Reports detailed statistics:
+   - Number of working proxies and success rate
+   - Average response time for working proxies
+   - Sample of errors for failed proxies
+
+Configuration:
+- Timeout: 10 seconds per proxy
+- Max concurrent checks: 50
+- Validation URL: https://www.google.com
+- Proxy protocols: HTTP/HTTPS
+
+Example output:
+```
+Fetched 763 proxies from ProxyScrape API
+Working proxies: 60/763 (7.86%)
+Average response time: 4.97s
 ```
 
 ## Test Environment
 
 The test suite uses:
-- Mock HTTP servers for proxy testing
-- Temporary files for output testing
-- Test configuration file
-- Cleanup of test artifacts after completion
+- Real proxy lists from ProxyScrape API
+- Concurrent proxy checking
+- Public endpoints for validation
+- Automatic cleanup of resources
 
 ## Writing New Tests
 
 When adding new tests:
 
-1. Choose the appropriate test file based on functionality
-2. Follow the existing test patterns
-3. Use table-driven tests where appropriate
-4. Add cleanup code for any test artifacts
-5. Update this README if adding new test categories
+1. Create a new test file in the appropriate package
+2. Follow Go's testing conventions
+3. Use benchmarks for performance-critical components
+4. Include proper error handling and logging
+5. Update this README with new test details
 
 ## Test Coverage
 
-The test suite aims to cover:
-- Basic proxy validation
-- Security checks
-  - Protocol smuggling
-  - DNS rebinding
-  - Cache poisoning
-  - Host header injection
-- Output formatting
-  - Text output
-  - JSON output
-  - Working proxies output
-- Configuration loading
-  - Valid configurations
-  - Invalid configurations
-- Error handling
+The test suite covers:
+- Proxy validation
+  - Connection testing
+  - Response validation
+  - Timeout handling
+- Concurrency handling
+  - Rate limiting
+  - Resource cleanup
+- Error scenarios
   - Network errors
-  - Invalid input
-  - Edge cases
-
-## Mocking
-
-The test suite uses several mocking strategies:
-- `httptest.Server` for mock HTTP servers
-- In-memory file system for config testing
-- Mock proxy responses
-- Simulated security vulnerabilities
+  - Invalid proxy formats
+  - Timeout conditions
 
 ## Continuous Integration
 
@@ -87,8 +92,8 @@ Tests are automatically run on:
 - Pull request creation
 - Pull request updates
 
-The GitHub Actions workflow runs:
+The CI workflow includes:
 1. Code linting
 2. Unit tests
-3. Coverage reporting
-4. Security checks 
+3. Benchmark tests (skipped for quick checks)
+4. Coverage reporting 

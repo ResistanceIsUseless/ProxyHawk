@@ -2,12 +2,9 @@ package main
 
 import (
 	"bufio"
-	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io"
-	"math/rand"
 	"net"
 	"net/http"
 	"net/url"
@@ -17,10 +14,13 @@ import (
 	"sync/atomic"
 	"time"
 
+	"flag"
+
+	"github.com/ResistanceIsUseless/ProxyCheck/cloudcheck"
+	proxylib "github.com/ResistanceIsUseless/ProxyCheck/proxy"
 	"github.com/charmbracelet/bubbles/progress"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"golang.org/x/net/proxy"
 	"gopkg.in/yaml.v3"
 )
 
@@ -90,26 +90,63 @@ var (
 	infoStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("244")).
 			Italic(true)
+
+	// Add spinner frames
+	spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 )
+
+// Add spinner helper
+func getSpinnerFrame(idx int) string {
+	return spinnerFrames[idx%len(spinnerFrames)]
+}
 
 // Model represents the application state
 type Model struct {
-	progress    progress.Model
-	total       int
-	current     int
-	results     []ProxyResultOutput
-	quitting    bool
-	err         error
-	activeJobs  int
-	queueSize   int
-	successRate float64
-	avgSpeed    time.Duration
-	debugInfo   string
-	warnings    []string
+	progress      progress.Model
+	total         int
+	current       int
+	results       []ProxyResultOutput
+	quitting      bool
+	err           error
+	activeJobs    int
+	queueSize     int
+	successRate   float64
+	avgSpeed      time.Duration
+	debugInfo     string
+	warnings      []string
+	spinnerIdx    int
+	activeChecks  map[string]*CheckStatus
+	lastUpdate    time.Time
+	cleanupTicker time.Time // Add cleanup ticker
+	useInteractsh bool
+	useCloud      bool
+	verbose       bool
+	debug         bool // Add debug mode flag
+}
+
+// Add this struct to track check status
+type CheckStatus struct {
+	Proxy        string
+	TotalChecks  int
+	DoneChecks   int
+	LastUpdate   time.Time
+	CheckResults []CheckResult
+	Speed        time.Duration
+	IsActive     bool
+	ProxyType    string
+	Position     int // Add position field
+}
+
+type tickMsg time.Time
+
+func tick() tea.Cmd {
+	return tea.Tick(time.Millisecond*100, func(t time.Time) tea.Msg {
+		return tickMsg(t)
+	})
 }
 
 func (m Model) Init() tea.Cmd {
-	return nil
+	return tea.Batch(tick(), m.progress.Init())
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -120,6 +157,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
+	case tickMsg:
+		m.spinnerIdx++
+		now := time.Now()
+
+		// Cleanup stalled checks every second
+		if now.Sub(m.cleanupTicker) >= time.Second {
+			m.cleanupTicker = now
+			for proxy, status := range m.activeChecks {
+				// If a check hasn't updated in 10 seconds or is complete, remove it
+				if now.Sub(status.LastUpdate) > 10*time.Second ||
+					(status.DoneChecks >= status.TotalChecks && !status.IsActive) {
+					delete(m.activeChecks, proxy)
+				}
+			}
+		}
+
+		// Update active jobs count to match actual active checks
+		activeCount := 0
+		for _, status := range m.activeChecks {
+			if status.IsActive && time.Since(status.LastUpdate) < 5*time.Second {
+				activeCount++
+			}
+		}
+		if activeCount != m.activeJobs {
+			m.activeJobs = activeCount
+		}
+
+		return m, tick()
+
 	case progressMsg:
 		if msg.current > m.current {
 			m.current = msg.current
@@ -128,20 +194,48 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.successRate = msg.successRate
 			m.avgSpeed = msg.avgSpeed
 			m.debugInfo = msg.debugInfo
-			// Always append the result
+			m.lastUpdate = time.Now()
+
+			// Update active checks
+			proxy := msg.result.Proxy
+			if len(msg.result.CheckResults) > 0 {
+				status, exists := m.activeChecks[proxy]
+				if !exists {
+					status = &CheckStatus{
+						Proxy:        proxy,
+						TotalChecks:  len(config.TestURLs.URLs), // Use actual number from config
+						CheckResults: make([]CheckResult, 0),
+						IsActive:     true,
+					}
+					m.activeChecks[proxy] = status
+				}
+				status.DoneChecks = len(msg.result.CheckResults)
+				status.CheckResults = msg.result.CheckResults
+				status.Speed = msg.result.Speed
+				status.LastUpdate = time.Now()
+
+				// Only mark as inactive if all checks are complete
+				if status.DoneChecks >= status.TotalChecks {
+					status.IsActive = false
+				}
+			}
+
 			if len(m.results) == 0 || m.results[len(m.results)-1].Proxy != msg.result.Proxy {
 				m.results = append(m.results, msg.result)
 			}
-			return m, m.progress.SetPercent(float64(m.current) / float64(m.total))
+			return m, tea.Batch(
+				m.progress.SetPercent(float64(m.current)/float64(m.total)),
+				tick(),
+			)
 		}
-		return m, nil
+		return m, tick()
 
 	case quitMsg:
 		m.quitting = true
 		return m, tea.Quit
 	}
 
-	return m, nil
+	return m, tick()
 }
 
 func (m Model) View() string {
@@ -153,26 +247,24 @@ func (m Model) View() string {
 		return successStyle.Render("Quitting...")
 	}
 
+	if m.debug {
+		return m.debugView()
+	}
+
+	if m.verbose {
+		return m.verboseView()
+	}
+
+	return m.defaultView()
+}
+
+func (m Model) defaultView() string {
 	str := strings.Builder{}
 
 	// Title
 	str.WriteString(headerStyle.Render("ProxyCheck Progress") + "\n\n")
 
-	// Warnings (if any)
-	if len(m.warnings) > 0 {
-		str.WriteString(warningStyle.Render("Proxy loading warnings:") + "\n")
-		for _, warning := range m.warnings {
-			str.WriteString(warningStyle.Render(warning) + "\n")
-		}
-		str.WriteString("\n")
-	}
-
-	// Debug info (if available)
-	if m.debugInfo != "" {
-		str.WriteString(debugBlockStyle.Render(fmt.Sprintf("Debug Info:\n%s", m.debugInfo)) + "\n\n")
-	}
-
-	// Progress section
+	// Basic progress information
 	progressBlock := strings.Builder{}
 	progressBlock.WriteString(fmt.Sprintf("%s %s/%s\n",
 		metricLabelStyle.Render("Progress:"),
@@ -181,98 +273,432 @@ func (m Model) View() string {
 	progressBlock.WriteString(m.progress.View())
 	str.WriteString(progressStyle.Render(progressBlock.String()) + "\n")
 
-	// Status metrics
-	statusBlock := strings.Builder{}
-	statusBlock.WriteString(fmt.Sprintf("%s %s\n",
-		metricLabelStyle.Render("Active Workers:"),
-		metricValueStyle.Render(fmt.Sprintf("%d", m.activeJobs))))
-	statusBlock.WriteString(fmt.Sprintf("%s %s",
-		metricLabelStyle.Render("Queue Size:"),
-		metricValueStyle.Render(fmt.Sprintf("%d", m.queueSize))))
-	str.WriteString(statusBlockStyle.Render(statusBlock.String()) + "\n")
+	// Current Checks Section - Show all active proxies
+	str.WriteString("\nCurrent Checks:\n")
 
-	// Performance metrics
-	if m.current > 0 {
-		perfBlock := strings.Builder{}
-		successRateColor := "87" // Default color (good)
-		if m.successRate < 50 {
-			successRateColor = "203" // Red for low success rate
-		} else if m.successRate < 80 {
-			successRateColor = "214" // Yellow for medium success rate
+	// Create a sorted slice of positions and their corresponding checks
+	type proxyStatus struct {
+		proxy  string
+		status *CheckStatus
+	}
+	var activeList []proxyStatus
+	positions := make(map[int]proxyStatus)
+
+	// First, collect all active checks and their positions
+	for proxy, status := range m.activeChecks {
+		if status.IsActive && time.Since(status.LastUpdate) < 5*time.Second {
+			positions[status.Position] = proxyStatus{proxy, status}
 		}
-
-		perfBlock.WriteString(fmt.Sprintf("%s %s",
-			metricLabelStyle.Render("Success Rate:"),
-			lipgloss.NewStyle().
-				Foreground(lipgloss.Color(successRateColor)).
-				Bold(true).
-				Render(fmt.Sprintf("%.1f%%", m.successRate))))
-
-		if m.avgSpeed > 0 {
-			speedColor := "87" // Default color (good)
-			if m.avgSpeed > 2*time.Second {
-				speedColor = "203" // Red for slow speed
-			} else if m.avgSpeed > time.Second {
-				speedColor = "214" // Yellow for medium speed
-			}
-
-			perfBlock.WriteString(fmt.Sprintf("\n%s %s",
-				metricLabelStyle.Render("Average Speed:"),
-				lipgloss.NewStyle().
-					Foreground(lipgloss.Color(speedColor)).
-					Render(m.avgSpeed.Round(time.Millisecond).String())))
-		}
-		str.WriteString(metricBlockStyle.Render(perfBlock.String()) + "\n")
 	}
 
-	// Recent Results
-	if len(m.results) > 0 {
-		str.WriteString("\nLatest Results:\n")
-		start := len(m.results) - 5
-		if start < 0 {
-			start = 0
+	// Create a sorted list based on positions
+	maxPosition := -1
+	for pos := range positions {
+		if pos > maxPosition {
+			maxPosition = pos
 		}
-		for _, result := range m.results[start:] {
-			status := successStyle.Render("✓")
-			if !result.Working {
-				status = errorStyle.Render("✗")
-			}
+	}
 
-			// Create a summary of all checks
-			checkSummary := ""
-			if len(result.CheckResults) > 0 {
-				successChecks := 0
-				totalTime := time.Duration(0)
-				for _, check := range result.CheckResults {
-					if check.Success {
-						successChecks++
-					}
-					totalTime += check.Speed
-				}
-				avgSpeed := totalTime / time.Duration(len(result.CheckResults))
-				checkSummary = fmt.Sprintf("[%d/%d checks passed, avg speed: %v]",
-					successChecks,
-					len(result.CheckResults),
-					avgSpeed.Round(time.Millisecond))
-			}
+	// Fill the list in order of positions
+	for i := 0; i <= maxPosition; i++ {
+		if ps, exists := positions[i]; exists {
+			activeList = append(activeList, ps)
+		}
+	}
 
-			str.WriteString(fmt.Sprintf("%s %s %s\n", status, result.Proxy, checkSummary))
+	// Display active checks in their fixed positions
+	for _, ps := range activeList {
+		proxy, status := ps.proxy, ps.status
+		hostPort := proxy
+		if strings.Contains(hostPort, "://") {
+			hostPort = strings.Split(hostPort, "://")[1]
+		}
 
-			// Show individual check results if debug is enabled
-			if m.debugInfo != "" {
-				for _, check := range result.CheckResults {
-					checkStatus := successStyle.Render("✓")
-					if !check.Success {
-						checkStatus = errorStyle.Render("✗")
-					}
-					details := fmt.Sprintf("Status: %d, Speed: %v", check.StatusCode, check.Speed.Round(time.Millisecond))
-					if check.Error != "" {
-						details = fmt.Sprintf("Error: %s", check.Error)
-					}
-					str.WriteString(fmt.Sprintf("  %s %s - %s\n", checkStatus, check.URL, details))
-				}
+		spinner := getSpinnerFrame(m.spinnerIdx)
+		successCount := 0
+		for _, check := range status.CheckResults {
+			if check.Success {
+				successCount++
 			}
 		}
+
+		// Create status indicator based on check results
+		var statusIndicator string
+		if len(status.CheckResults) == 0 {
+			statusIndicator = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("244")).
+				Render("CHECKING")
+		} else if successCount == 0 && len(status.CheckResults) == len(config.TestURLs.URLs) {
+			statusIndicator = errorStyle.Render("FAILED")
+		} else if successCount == len(config.TestURLs.URLs) {
+			statusIndicator = successStyle.Render("SUCCESS")
+		} else if len(status.CheckResults) == len(config.TestURLs.URLs) {
+			statusIndicator = warningStyle.Render("PARTIAL")
+		} else {
+			statusIndicator = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("244")).
+				Render("CHECKING")
+		}
+
+		// Format the check count with appropriate color
+		checkCountStyle := errorStyle
+		if successCount > 0 {
+			if successCount == len(config.TestURLs.URLs) {
+				checkCountStyle = successStyle
+			} else {
+				checkCountStyle = warningStyle
+			}
+		}
+		checkCount := checkCountStyle.Render(fmt.Sprintf("%d/%d", successCount, len(config.TestURLs.URLs)))
+
+		statusLine := fmt.Sprintf("%s %s [%s] %s (%s checks)",
+			lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Render(spinner),
+			lipgloss.NewStyle().Bold(true).Render(hostPort),
+			successStyle.Render(status.ProxyType),
+			statusIndicator,
+			checkCount)
+		str.WriteString(statusLine + "\n")
+	}
+
+	// If we have fewer active checks than concurrency, show pending slots
+	if len(activeList) < m.activeJobs {
+		remainingSlots := m.activeJobs - len(activeList)
+		waitingStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("244")).
+			PaddingLeft(2)
+		for i := 0; i < remainingSlots; i++ {
+			str.WriteString(waitingStyle.Render("Waiting for next proxy...") + "\n")
+		}
+	}
+
+	// Controls
+	str.WriteString("\n" + infoStyle.Render("Press q to quit"))
+
+	return str.String()
+}
+
+func (m Model) verboseView() string {
+	str := strings.Builder{}
+
+	// Title
+	str.WriteString(headerStyle.Render("ProxyCheck Progress (Verbose Mode)") + "\n\n")
+
+	// Basic progress information
+	progressBlock := strings.Builder{}
+	progressBlock.WriteString(fmt.Sprintf("%s %s/%s\n",
+		metricLabelStyle.Render("Progress:"),
+		metricValueStyle.Render(fmt.Sprintf("%d", m.current)),
+		metricValueStyle.Render(fmt.Sprintf("%d", m.total))))
+	progressBlock.WriteString(m.progress.View())
+	str.WriteString(progressStyle.Render(progressBlock.String()) + "\n")
+
+	// Metrics Section
+	metricsBlock := strings.Builder{}
+	metricsBlock.WriteString(fmt.Sprintf("%s %d\n",
+		metricLabelStyle.Render("Active Jobs:"),
+		m.activeJobs))
+	metricsBlock.WriteString(fmt.Sprintf("%s %d\n",
+		metricLabelStyle.Render("Queue Size:"),
+		m.queueSize))
+	metricsBlock.WriteString(fmt.Sprintf("%s %.2f%%\n",
+		metricLabelStyle.Render("Success Rate:"),
+		m.successRate))
+	metricsBlock.WriteString(fmt.Sprintf("%s %v\n",
+		metricLabelStyle.Render("Average Speed:"),
+		m.avgSpeed.Round(time.Millisecond)))
+	str.WriteString(metricBlockStyle.Render(metricsBlock.String()) + "\n")
+
+	// Current Checks Section with detailed information
+	str.WriteString("\nCurrent Checks:\n")
+
+	type proxyStatus struct {
+		proxy  string
+		status *CheckStatus
+	}
+	var activeList []proxyStatus
+	positions := make(map[int]proxyStatus)
+
+	// First, collect all active checks and their positions
+	for proxy, status := range m.activeChecks {
+		if status.IsActive && time.Since(status.LastUpdate) < 5*time.Second {
+			positions[status.Position] = proxyStatus{proxy, status}
+		}
+	}
+
+	// Create a sorted list based on positions
+	maxPosition := -1
+	for pos := range positions {
+		if pos > maxPosition {
+			maxPosition = pos
+		}
+	}
+
+	// Fill the list in order of positions
+	for i := 0; i <= maxPosition; i++ {
+		if ps, exists := positions[i]; exists {
+			activeList = append(activeList, ps)
+		}
+	}
+
+	// Display active checks in their fixed positions with detailed information
+	for _, ps := range activeList {
+		proxy, status := ps.proxy, ps.status
+		hostPort := proxy
+		if strings.Contains(hostPort, "://") {
+			hostPort = strings.Split(hostPort, "://")[1]
+		}
+
+		spinner := getSpinnerFrame(m.spinnerIdx)
+		successCount := 0
+		for _, check := range status.CheckResults {
+			if check.Success {
+				successCount++
+			}
+		}
+
+		// Main status line with more details
+		str.WriteString(fmt.Sprintf("%s %s\n",
+			lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Render(spinner),
+			lipgloss.NewStyle().Bold(true).Render(hostPort)))
+
+		str.WriteString(fmt.Sprintf("  Type: %s\n", successStyle.Render(status.ProxyType)))
+		str.WriteString(fmt.Sprintf("  Status: %s\n", getStatusIndicator(status)))
+		str.WriteString(fmt.Sprintf("  Progress: %s checks\n", getCheckCount(status)))
+		if status.Speed > 0 {
+			str.WriteString(fmt.Sprintf("  Speed: %v\n", status.Speed.Round(time.Millisecond)))
+		}
+
+		// Add detailed check results
+		if len(status.CheckResults) > 0 {
+			str.WriteString("  Check Results:\n")
+			for _, check := range status.CheckResults {
+				checkStatus := successStyle.Render("✓")
+				if !check.Success {
+					checkStatus = errorStyle.Render("✗")
+				}
+
+				// Format URL to show only the hostname
+				displayURL := check.URL
+				if u, err := url.Parse(check.URL); err == nil {
+					displayURL = u.Host
+				}
+
+				// Build detailed check information
+				details := []string{
+					fmt.Sprintf("Status: %d", check.StatusCode),
+					fmt.Sprintf("Speed: %v", check.Speed.Round(time.Millisecond)),
+				}
+				if check.BodySize > 0 {
+					details = append(details, fmt.Sprintf("Size: %d bytes", check.BodySize))
+				}
+				if check.Error != "" {
+					details = append(details, fmt.Sprintf("Error: %s", check.Error))
+				}
+
+				str.WriteString(fmt.Sprintf("    %s %s - %s\n",
+					checkStatus,
+					displayURL,
+					strings.Join(details, ", ")))
+			}
+		}
+		str.WriteString("\n")
+	}
+
+	// If we have fewer active checks than concurrency, show pending slots
+	if len(activeList) < m.activeJobs {
+		remainingSlots := m.activeJobs - len(activeList)
+		waitingStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("244")).
+			PaddingLeft(2)
+		for i := 0; i < remainingSlots; i++ {
+			str.WriteString(waitingStyle.Render("Waiting for next proxy...") + "\n")
+		}
+	}
+
+	// Successful Proxies Section
+	str.WriteString("\nSuccessful Proxies:\n")
+	successBlock := strings.Builder{}
+	successCount := 0
+	for _, result := range m.results {
+		if result.Working {
+			successCount++
+			hostPort := result.Proxy
+			proxyType := "http"
+			if strings.HasPrefix(strings.ToLower(hostPort), "socks4://") {
+				proxyType = "socks4"
+			} else if strings.HasPrefix(strings.ToLower(hostPort), "socks5://") {
+				proxyType = "socks5"
+			} else if strings.HasPrefix(strings.ToLower(hostPort), "https://") {
+				proxyType = "https"
+			}
+
+			if strings.Contains(hostPort, "://") {
+				hostPort = strings.Split(hostPort, "://")[1]
+			}
+
+			// Calculate success rate for this proxy
+			successfulChecks := 0
+			totalChecks := len(result.CheckResults)
+			for _, check := range result.CheckResults {
+				if check.Success {
+					successfulChecks++
+				}
+			}
+
+			// Format the details
+			details := []string{
+				fmt.Sprintf("type=%s", proxyType),
+				fmt.Sprintf("checks=%d/%d", successfulChecks, totalChecks),
+				fmt.Sprintf("speed=%v", result.Speed.Round(time.Millisecond)),
+			}
+			if result.IsAnonymous {
+				details = append(details, "anonymous=true")
+			}
+			if result.CloudProvider != "" {
+				details = append(details, fmt.Sprintf("cloud=%s", result.CloudProvider))
+			}
+
+			successBlock.WriteString(fmt.Sprintf("%s %s [%s]\n",
+				successStyle.Render("✓"),
+				hostPort,
+				strings.Join(details, ", ")))
+		}
+	}
+	if successCount > 0 {
+		str.WriteString(successStyle.Render(fmt.Sprintf("Found %d working proxies:\n", successCount)))
+		str.WriteString(successBlock.String())
+	} else {
+		str.WriteString(infoStyle.Render("No working proxies found yet\n"))
+	}
+
+	// Debug Information Section
+	if m.debugInfo != "" {
+		str.WriteString("\nDebug Information:\n")
+		str.WriteString(debugBlockStyle.Render(m.debugInfo) + "\n")
+	}
+
+	// Controls
+	str.WriteString("\n" + infoStyle.Render("Press q to quit"))
+
+	return str.String()
+}
+
+func (m Model) debugView() string {
+	str := strings.Builder{}
+
+	// Title
+	str.WriteString(headerStyle.Render("ProxyCheck Progress (Debug Mode)") + "\n\n")
+
+	// Basic progress information
+	progressBlock := strings.Builder{}
+	progressBlock.WriteString(fmt.Sprintf("%s %s/%s\n",
+		metricLabelStyle.Render("Progress:"),
+		metricValueStyle.Render(fmt.Sprintf("%d", m.current)),
+		metricValueStyle.Render(fmt.Sprintf("%d", m.total))))
+	progressBlock.WriteString(m.progress.View())
+	str.WriteString(progressStyle.Render(progressBlock.String()) + "\n")
+
+	// Current Checks Section with detailed debug information
+	str.WriteString("\nCurrent Checks:\n")
+
+	type proxyStatus struct {
+		proxy  string
+		status *CheckStatus
+	}
+	var activeList []proxyStatus
+	positions := make(map[int]proxyStatus)
+
+	// First, collect all active checks and their positions
+	for proxy, status := range m.activeChecks {
+		if status.IsActive && time.Since(status.LastUpdate) < 5*time.Second {
+			positions[status.Position] = proxyStatus{proxy, status}
+		}
+	}
+
+	// Create a sorted list based on positions
+	maxPosition := -1
+	for pos := range positions {
+		if pos > maxPosition {
+			maxPosition = pos
+		}
+	}
+
+	// Fill the list in order of positions
+	for i := 0; i <= maxPosition; i++ {
+		if ps, exists := positions[i]; exists {
+			activeList = append(activeList, ps)
+		}
+	}
+
+	// Display active checks in their fixed positions with debug information
+	for _, ps := range activeList {
+		proxy, status := ps.proxy, ps.status
+		hostPort := proxy
+		if strings.Contains(hostPort, "://") {
+			hostPort = strings.Split(hostPort, "://")[1]
+		}
+
+		spinner := getSpinnerFrame(m.spinnerIdx)
+		successCount := 0
+		for _, check := range status.CheckResults {
+			if check.Success {
+				successCount++
+			}
+		}
+
+		// Main status line
+		statusLine := fmt.Sprintf("%s %s [%s] (%d/%d checks)\n",
+			lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Render(spinner),
+			lipgloss.NewStyle().Bold(true).Render(hostPort),
+			successStyle.Render(status.ProxyType),
+			successCount,
+			status.TotalChecks)
+		str.WriteString(statusLine)
+
+		// Add detailed check results with debug information
+		for _, check := range status.CheckResults {
+			checkStatus := successStyle.Render("✓")
+			if !check.Success {
+				checkStatus = errorStyle.Render("✗")
+			}
+
+			// Debug information for each check
+			str.WriteString(fmt.Sprintf("  %s %s\n", checkStatus, check.URL))
+			str.WriteString(fmt.Sprintf("    Status Code: %d\n", check.StatusCode))
+			str.WriteString(fmt.Sprintf("    Response Size: %d bytes\n", check.BodySize))
+			str.WriteString(fmt.Sprintf("    Response Time: %v\n", check.Speed.Round(time.Millisecond)))
+
+			if check.Error != "" {
+				str.WriteString(fmt.Sprintf("    Error: %s\n", check.Error))
+			}
+		}
+
+		// Add request/response debug info if available
+		if status.LastUpdate.IsZero() {
+			str.WriteString("    No requests made yet\n")
+		} else {
+			str.WriteString(fmt.Sprintf("    Last Update: %v ago\n",
+				time.Since(status.LastUpdate).Round(time.Millisecond)))
+		}
+
+		str.WriteString("\n")
+	}
+
+	// If we have fewer active checks than concurrency, show pending slots
+	if len(activeList) < m.activeJobs {
+		remainingSlots := m.activeJobs - len(activeList)
+		waitingStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("244")).
+			PaddingLeft(2)
+		for i := 0; i < remainingSlots; i++ {
+			str.WriteString(waitingStyle.Render("Waiting for next proxy...") + "\n")
+		}
+	}
+
+	// Debug Information Section
+	if m.debugInfo != "" {
+		str.WriteString("\nDebug Information:\n")
+		str.WriteString(debugBlockStyle.Render(m.debugInfo) + "\n")
 	}
 
 	// Controls
@@ -305,7 +731,7 @@ type progressMsg struct {
 
 type quitMsg struct{}
 
-func checkProxiesWithProgress(proxies []string, singleURL string, useInteractsh, useIPInfo, useCloud, debug bool, timeout time.Duration, concurrency int) tea.Model {
+func checkProxiesWithProgress(proxies []string, singleURL string, useInteractsh, useIPInfo, useCloud, verbose, debug bool, timeout time.Duration, concurrency int) tea.Model {
 	p := progress.New(
 		progress.WithDefaultGradient(),
 		progress.WithWidth(40),
@@ -313,78 +739,245 @@ func checkProxiesWithProgress(proxies []string, singleURL string, useInteractsh,
 	)
 
 	model := Model{
-		progress: p,
-		total:    len(proxies),
-		results:  make([]ProxyResultOutput, 0, len(proxies)),
+		progress:      p,
+		total:         len(proxies),
+		results:       make([]ProxyResultOutput, 0, len(proxies)),
+		activeChecks:  make(map[string]*CheckStatus),
+		useInteractsh: useInteractsh,
+		useCloud:      useCloud,
+		verbose:       verbose,
+		activeJobs:    concurrency,
+		debug:         debug,
 	}
 
 	// Store any warnings from proxy loading
 	for _, proxy := range proxies {
-		if strings.HasPrefix(proxy, "socks") {
-			model.warnings = append(model.warnings, fmt.Sprintf("Warning: skipping unsupported scheme 'socks' for proxy '%s'", proxy))
+		if strings.HasPrefix(proxy, "socks") && !strings.HasPrefix(proxy, "socks4") && !strings.HasPrefix(proxy, "socks5") {
+			model.warnings = append(model.warnings, fmt.Sprintf("Warning: unsupported SOCKS version for proxy '%s' (only SOCKS4 and SOCKS5 are supported)", proxy))
 		}
 	}
 
 	go func() {
 		// Create buffered channels
-		results := make(chan ProxyResult, len(proxies)) // Buffer all possible results
-		jobs := make(chan string, concurrency)          // Buffer only concurrent jobs
-		var activeWorkers int32                         // Use atomic counter instead of channel
+		proxyQueue := make(chan string, concurrency)
+		updateQueue := make(chan progressMsg, concurrency)
+		var wg sync.WaitGroup
 
-		// Track metrics
+		// Track metrics and position
 		var (
 			mu           sync.Mutex
 			successCount int64
 			totalTime    time.Duration
 			completed    int32
+			nextPosition int
 		)
 
+		// Start update aggregator
+		go func() {
+			ticker := time.NewTicker(100 * time.Millisecond)
+			defer ticker.Stop()
+
+			var lastUpdate progressMsg
+			for {
+				select {
+				case update := <-updateQueue:
+					lastUpdate = update
+				case <-ticker.C:
+					if lastUpdate.current > 0 || len(model.activeChecks) > 0 {
+						program.Send(lastUpdate)
+					}
+				}
+			}
+		}()
+
 		// Start workers
-		var wg sync.WaitGroup
 		for i := 0; i < concurrency; i++ {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				for proxy := range jobs {
-					atomic.AddInt32(&activeWorkers, 1) // Increment active workers
+				for proxy := range proxyQueue {
 					start := time.Now()
 
-					// Check proxy
-					checkProxyWithInteractsh(proxy, singleURL, useInteractsh, useIPInfo, useCloud, debug, timeout, results)
+					// Determine proxy type
+					proxyType := "http"
+					if strings.HasPrefix(strings.ToLower(proxy), "socks4://") {
+						proxyType = "socks4"
+					} else if strings.HasPrefix(strings.ToLower(proxy), "socks5://") {
+						proxyType = "socks5"
+					} else if strings.HasPrefix(strings.ToLower(proxy), "https://") {
+						proxyType = "https"
+					}
 
-					// Get the result
-					result := <-results
+					// Initialize check status for this proxy
+					mu.Lock()
+					position := nextPosition
+					nextPosition++
+					status := &CheckStatus{
+						Proxy:        proxy,
+						TotalChecks:  len(config.TestURLs.URLs),
+						CheckResults: make([]CheckResult, 0),
+						LastUpdate:   time.Now(),
+						IsActive:     true,
+						ProxyType:    proxyType,
+						Position:     position,
+					}
+					model.activeChecks[proxy] = status
+					mu.Unlock()
 
-					// Update metrics safely
+					// Send initial status update
+					updateQueue <- progressMsg{
+						current:    int(atomic.LoadInt32(&completed)),
+						result:     ProxyResultOutput{Proxy: proxy},
+						activeJobs: model.activeJobs,
+						queueSize:  len(proxyQueue),
+					}
+
+					// Perform all checks for this proxy
+					result := ProxyResult{
+						URL:          proxy,
+						Working:      false,
+						CheckResults: make([]CheckResult, 0),
+					}
+
+					// Create proxy client
+					proxyURL, err := url.Parse(proxy)
+					if err != nil {
+						if debug {
+							result.DebugInfo = fmt.Sprintf("Error parsing proxy URL: %v\n", err)
+						}
+						result.Error = err.Error()
+					} else {
+						client, err := proxylib.CreateClient(proxyURL, time.Duration(config.Timeout)*time.Second)
+						if err != nil {
+							if debug {
+								result.DebugInfo = fmt.Sprintf("Error creating proxy client: %v\n", err)
+							}
+							result.Error = err.Error()
+						} else {
+							// Test all configured URLs
+							successfulChecks := 0
+
+							for _, testURL := range config.TestURLs.URLs {
+								checkStart := time.Now()
+								if debug {
+									result.DebugInfo += fmt.Sprintf("\nTesting URL: %s\n", testURL.URL)
+								}
+
+								req, err := http.NewRequest("GET", testURL.URL, nil)
+								if err != nil {
+									if debug {
+										result.DebugInfo += fmt.Sprintf("Failed to create request: %v\n", err)
+									}
+									result.CheckResults = append(result.CheckResults, CheckResult{
+										URL:     testURL.URL,
+										Success: false,
+										Speed:   time.Since(checkStart),
+										Error:   fmt.Sprintf("Failed to create request: %v", err),
+									})
+									continue
+								}
+
+								// Add configured headers
+								req.Header.Set("User-Agent", config.UserAgent)
+								for key, value := range config.DefaultHeaders {
+									req.Header.Set(key, value)
+								}
+
+								resp, err := client.Do(req)
+								if err != nil {
+									if debug {
+										result.DebugInfo += fmt.Sprintf("Request failed: %v\n", err)
+									}
+									result.CheckResults = append(result.CheckResults, CheckResult{
+										URL:     testURL.URL,
+										Success: false,
+										Speed:   time.Since(checkStart),
+										Error:   fmt.Sprintf("Request failed: %v", err),
+									})
+									continue
+								}
+
+								body, err := io.ReadAll(resp.Body)
+								resp.Body.Close()
+
+								if err != nil {
+									if debug {
+										result.DebugInfo += fmt.Sprintf("Failed to read response body: %v\n", err)
+									}
+									result.CheckResults = append(result.CheckResults, CheckResult{
+										URL:        testURL.URL,
+										Success:    false,
+										Speed:      time.Since(checkStart),
+										Error:      fmt.Sprintf("Failed to read response: %v", err),
+										StatusCode: resp.StatusCode,
+									})
+									continue
+								}
+
+								// Validate response
+								valid, validationDebug := proxylib.ValidateResponse(resp, body, &proxylib.Config{
+									MinResponseBytes:   config.Validation.MinResponseBytes,
+									DisallowedKeywords: config.Validation.DisallowedKeywords,
+								}, debug)
+
+								if debug {
+									result.DebugInfo += validationDebug
+								}
+
+								checkResult := CheckResult{
+									URL:        testURL.URL,
+									Success:    valid,
+									Speed:      time.Since(checkStart),
+									StatusCode: resp.StatusCode,
+									BodySize:   int64(len(body)),
+								}
+
+								if !valid {
+									checkResult.Error = "Response validation failed"
+								} else {
+									successfulChecks++
+								}
+
+								result.CheckResults = append(result.CheckResults, checkResult)
+							}
+
+							// Only mark as working if we met the minimum required successful checks
+							if successfulChecks >= config.TestURLs.RequiredSuccessCount {
+								result.Working = true
+							}
+
+							result.Speed = time.Since(start)
+							if debug {
+								result.DebugInfo += fmt.Sprintf("\nTotal Time: %v\n", result.Speed)
+								result.DebugInfo += fmt.Sprintf("Successful Checks: %d/%d\n", successfulChecks, len(config.TestURLs.URLs))
+							}
+						}
+					}
+
 					mu.Lock()
 					if result.Working {
 						successCount++
-						totalTime += time.Since(start)
+						totalTime += result.Speed
 					}
 
-					// Prepare error message
-					var errorMsg string
-					if result.Error != nil {
-						errorMsg = result.Error.Error()
+					// Update check status with results
+					if status, exists := model.activeChecks[proxy]; exists {
+						status.CheckResults = result.CheckResults
+						status.Speed = result.Speed
+						status.LastUpdate = time.Now()
+						status.DoneChecks = len(result.CheckResults)
+						if status.DoneChecks >= status.TotalChecks {
+							status.IsActive = false
+						}
 					}
 
-					// Prepare cloud provider name
-					var cloudProviderName string
-					if result.CloudProvider != nil {
-						cloudProviderName = result.CloudProvider.Name
-					}
-
-					// Store result
+					// Store final result
 					model.results = append(model.results, ProxyResultOutput{
-						Proxy:          result.Proxy,
+						Proxy:          result.URL,
 						Working:        result.Working,
 						Speed:          result.Speed,
-						Error:          errorMsg,
-						InteractshTest: result.InteractshTest,
-						RealIP:         result.RealIP,
-						ProxyIP:        result.ProxyIP,
-						IsAnonymous:    result.IsAnonymous,
-						CloudProvider:  cloudProviderName,
+						Error:          result.Error,
+						CloudProvider:  result.CloudProvider,
 						InternalAccess: result.InternalAccess,
 						MetadataAccess: result.MetadataAccess,
 						Timestamp:      time.Now(),
@@ -392,39 +985,36 @@ func checkProxiesWithProgress(proxies []string, singleURL string, useInteractsh,
 					})
 					mu.Unlock()
 
-					atomic.AddInt32(&activeWorkers, -1) // Decrement active workers
-
-					// Update progress atomically
+					// Update progress
 					current := atomic.AddInt32(&completed, 1)
 
-					// Send progress update
-					program.Send(progressMsg{
+					// Send final progress update for this proxy
+					updateQueue <- progressMsg{
 						current:     int(current),
 						result:      model.results[len(model.results)-1],
-						activeJobs:  int(atomic.LoadInt32(&activeWorkers)),
-						queueSize:   len(jobs),
+						activeJobs:  model.activeJobs,
+						queueSize:   len(proxyQueue),
 						successRate: float64(successCount) / float64(current) * 100,
 						avgSpeed:    totalTime / time.Duration(max(successCount, 1)),
 						debugInfo:   result.DebugInfo,
-					})
-
-					// Add small delay to prevent UI flicker
-					time.Sleep(100 * time.Millisecond)
+					}
 				}
 			}()
 		}
 
-		// Feed jobs
+		// Feed proxies to workers
 		for _, proxy := range proxies {
-			jobs <- proxy
+			proxyQueue <- proxy
 		}
-		close(jobs)
+		close(proxyQueue)
 
 		// Wait for all workers to finish
 		wg.Wait()
-		close(results)
 
-		// Send quit message only after all workers are done
+		// Update active jobs to 0 when complete
+		model.activeJobs = 0
+
+		// Send quit message
 		program.Send(quitMsg{})
 	}()
 
@@ -441,15 +1031,6 @@ func max(a, b int64) int64 {
 
 var program *tea.Program
 
-type CloudProvider struct {
-	Name           string   `yaml:"name"`
-	MetadataIPs    []string `yaml:"metadata_ips"`
-	MetadataURLs   []string `yaml:"metadata_urls"`
-	InternalRanges []string `yaml:"internal_ranges"`
-	ASNs           []string `yaml:"asns"`
-	OrgNames       []string `yaml:"org_names"`
-}
-
 type TestURL struct {
 	URL         string `yaml:"url"`
 	Description string `yaml:"description"`
@@ -463,11 +1044,15 @@ type TestURLConfig struct {
 }
 
 type Config struct {
-	CloudProviders []CloudProvider   `yaml:"cloud_providers"`
-	DefaultHeaders map[string]string `yaml:"default_headers"`
-	UserAgent      string            `yaml:"user_agent"`
-	TestURLs       TestURLConfig     `yaml:"test_urls"`
-	Validation     struct {
+	Timeout              int                        `yaml:"timeout"`
+	InsecureSkipVerify   bool                       `yaml:"insecure_skip_verify"`
+	UserAgent            string                     `yaml:"user_agent"`
+	DefaultHeaders       map[string]string          `yaml:"default_headers"`
+	CloudProviders       []cloudcheck.CloudProvider `yaml:"cloud_providers"`
+	EnableCloudChecks    bool                       `yaml:"enable_cloud_checks"`
+	EnableAnonymityCheck bool                       `yaml:"enable_anonymity_check"`
+	TestURLs             TestURLConfig              `yaml:"test_urls"`
+	Validation           struct {
 		RequireStatusCode   int      `yaml:"require_status_code"`
 		RequireContentMatch string   `yaml:"require_content_match"`
 		RequireHeaderFields []string `yaml:"require_header_fields"`
@@ -502,15 +1087,9 @@ func loadConfig(filename string) error {
 			},
 			UserAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 			TestURLs: TestURLConfig{
-				DefaultURL:           "https://www.google.com",
+				DefaultURL:           "", // Will be loaded from config file
 				RequiredSuccessCount: 1,
-				URLs: []TestURL{
-					{
-						URL:         "https://www.google.com",
-						Description: "Default test using Google",
-						Required:    true,
-					},
-				},
+				URLs:                 []TestURL{}, // Will be loaded from config file
 			},
 			Validation: struct {
 				RequireStatusCode   int      `yaml:"require_status_code"`
@@ -565,29 +1144,27 @@ func loadConfig(filename string) error {
 
 type IPInfoResponse struct {
 	IP      string `json:"ip"`
-	Org     string `json:"org"`
-	ASN     string `json:"asn"`
-	Company struct {
-		Name string `json:"name"`
-	} `json:"company"`
+	Country string `json:"country"`
+	ISP     string `json:"isp"`
 }
 
 type ProxyResult struct {
-	Proxy          string
-	Working        bool
-	Speed          time.Duration
-	Error          error
-	InteractshTest bool
-	DebugInfo      string
-	RealIP         string
-	ProxyIP        string
-	IsAnonymous    bool
-	CloudProvider  *CloudProvider
-	InternalAccess bool
-	MetadataAccess bool
-	AdvancedChecks *AdvancedCheckResult
-	TestResults    map[string]bool
-	CheckResults   []CheckResult
+	URL            string               `json:"url"`
+	IP             string               `json:"ip"`
+	Country        string               `json:"country"`
+	ISP            string               `json:"isp"`
+	Working        bool                 `json:"working"`
+	Error          string               `json:"error,omitempty"`
+	CloudProvider  string               `json:"cloud_provider,omitempty"`
+	InternalAccess bool                 `json:"internal_access"`
+	MetadataAccess bool                 `json:"metadata_access"`
+	DebugInfo      string               `json:"debug_info,omitempty"`
+	Speed          time.Duration        `json:"speed_ns"`
+	CheckResults   []CheckResult        `json:"check_results,omitempty"`
+	IsAnonymous    bool                 `json:"is_anonymous"`
+	RealIP         string               `json:"real_ip,omitempty"`
+	ProxyIP        string               `json:"proxy_ip,omitempty"`
+	AdvancedChecks *AdvancedCheckResult `json:"advanced_checks,omitempty"`
 }
 
 type CheckResult struct {
@@ -628,436 +1205,244 @@ type SummaryOutput struct {
 	Results             []ProxyResultOutput `json:"results"`
 }
 
-// Add new function for WHOIS lookup
-func getWhoisInfo(ip string) (string, error) {
-	conn, err := net.Dial("tcp", "whois.iana.org:43")
+func getIPInfo(client *http.Client) (IPInfoResponse, error) {
+	var info IPInfoResponse
+
+	resp, err := client.Get("https://ipinfo.io/json")
 	if err != nil {
-		return "", err
+		return info, err
 	}
-	defer conn.Close()
+	defer resp.Body.Close()
 
-	fmt.Fprintf(conn, "%s\n", ip)
-	result, err := io.ReadAll(conn)
+	if resp.StatusCode != http.StatusOK {
+		return info, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	err = json.NewDecoder(resp.Body).Decode(&info)
 	if err != nil {
-		return "", err
+		return info, err
 	}
 
-	// Check if we need to query a specific WHOIS server
-	whoisServer := ""
-	for _, line := range strings.Split(string(result), "\n") {
-		if strings.HasPrefix(line, "whois:") {
-			whoisServer = strings.TrimSpace(strings.TrimPrefix(line, "whois:"))
-			break
-		}
-	}
-
-	if whoisServer != "" {
-		conn, err = net.Dial("tcp", whoisServer+":43")
-		if err != nil {
-			return "", err
-		}
-		defer conn.Close()
-
-		fmt.Fprintf(conn, "%s\n", ip)
-		result, err = io.ReadAll(conn)
-		if err != nil {
-			return "", err
-		}
-	}
-
-	return string(result), nil
+	return info, nil
 }
 
-// Add function to detect cloud provider from WHOIS data
-func detectCloudProviderFromWhois(whoisData string) *CloudProvider {
-	whoisUpper := strings.ToUpper(whoisData)
+// Add additional validation functions
+func checkProxyAnonymity(client *http.Client, debug bool) (bool, string, string, error) {
+	// Get real IP first
+	realIP, err := getIPInfo(http.DefaultClient)
+	if err != nil {
+		return false, "", "", err
+	}
+
+	// Get IP through proxy
+	proxyIP, err := getIPInfo(client)
+	if err != nil {
+		return false, "", "", err
+	}
+
+	return realIP.IP != proxyIP.IP, realIP.IP, proxyIP.IP, nil
+}
+
+func checkCloudProvider(client *http.Client, proxy string, debug bool) (string, bool, bool, error) {
 	for _, provider := range config.CloudProviders {
-		for _, orgName := range provider.OrgNames {
-			if strings.Contains(whoisUpper, strings.ToUpper(orgName)) {
-				return &provider
+		// Check metadata access
+		for _, metadataURL := range provider.MetadataURLs {
+			req, err := http.NewRequest("GET", metadataURL, nil)
+			if err != nil {
+				continue
 			}
-		}
-	}
-	return nil
-}
-
-// Add function to get random IPs from internal ranges
-func getRandomInternalIPs(provider *CloudProvider, count int) []string {
-	var ips []string
-	for _, cidr := range provider.InternalRanges {
-		_, network, err := net.ParseCIDR(cidr)
-		if err != nil {
-			continue
-		}
-
-		// Get first and last IP of range
-		firstIP := network.IP
-		lastIP := getLastIP(network)
-
-		// Generate random IPs in this range
-		for i := 0; i < count && len(ips) < count; i++ {
-			randomIP := generateRandomIP(firstIP, lastIP)
-			ips = append(ips, randomIP.String())
-		}
-	}
-	return ips
-}
-
-// Add function to generate a random IP between two IPs
-func generateRandomIP(first, last net.IP) net.IP {
-	// Convert IPs to integers for random generation
-	firstInt := ipToInt(first)
-	lastInt := ipToInt(last)
-
-	// Generate random number between first and last
-	random := firstInt + rand.Int63n(lastInt-firstInt+1)
-
-	// Convert back to IP
-	return intToIP(random)
-}
-
-func ipToInt(ip net.IP) int64 {
-	ip = ip.To4()
-	if ip == nil {
-		return 0
-	}
-	return int64(ip[0])<<24 | int64(ip[1])<<16 | int64(ip[2])<<8 | int64(ip[3])
-}
-
-func intToIP(i int64) net.IP {
-	ip := make(net.IP, 4)
-	ip[0] = byte(i >> 24)
-	ip[1] = byte(i >> 16)
-	ip[2] = byte(i >> 8)
-	ip[3] = byte(i)
-	return ip
-}
-
-// Add back getLastIP function
-func getLastIP(network *net.IPNet) net.IP {
-	lastIP := make(net.IP, len(network.IP))
-	copy(lastIP, network.IP)
-	for i := len(lastIP) - 1; i >= 0; i-- {
-		lastIP[i] |= ^network.Mask[i]
-	}
-	return lastIP
-}
-
-// Modify checkInternalAccess function to separate concerns
-func checkInternalAccess(client *http.Client, provider *CloudProvider, debug bool) (bool, bool, string) {
-	debugInfo := ""
-	if provider == nil {
-		return false, false, debugInfo
-	}
-
-	// Step 1: Check internal IP ranges
-	internalAccess := false
-	randomIPs := getRandomInternalIPs(provider, 5)
-
-	for _, ip := range randomIPs {
-		url := fmt.Sprintf("http://%s/", ip)
-		if debug {
-			debugInfo += fmt.Sprintf("\nTrying internal IP: %s\n", url)
-		}
-		req, _ := http.NewRequest("GET", url, nil)
-
-		// Add headers
-		if config.UserAgent != "" {
-			req.Header.Set("User-Agent", config.UserAgent)
-		}
-		for key, value := range config.DefaultHeaders {
-			req.Header.Set(key, value)
-		}
-
-		resp, err := client.Do(req)
-		if err == nil {
-			defer resp.Body.Close()
-			if debug {
-				debugInfo += fmt.Sprintf("Internal access successful to %s!\n", ip)
-			}
-			internalAccess = true
-			break
-		}
-	}
-
-	// Step 2: Check metadata endpoints
-	metadataAccess := false
-
-	// First try standard metadata IPs
-	for _, metadataIP := range provider.MetadataIPs {
-		// Try both HTTP and HTTPS
-		for _, scheme := range []string{"http", "https"} {
-			metadataURL := fmt.Sprintf("%s://%s/", scheme, metadataIP)
-			if debug {
-				debugInfo += fmt.Sprintf("\nTrying metadata IP: %s\n", metadataURL)
-			}
-
-			req, _ := http.NewRequest("GET", metadataURL, nil)
-
-			// Add headers
-			if config.UserAgent != "" {
-				req.Header.Set("User-Agent", config.UserAgent)
-			}
-			for key, value := range config.DefaultHeaders {
-				req.Header.Set(key, value)
-			}
-
-			// Add common metadata headers
-			req.Header.Set("Metadata", "true")
-			req.Header.Set("Metadata-Flavor", "Google")
-			req.Header.Set("X-aws-ec2-metadata-token-ttl-seconds", "21600")
-
 			resp, err := client.Do(req)
 			if err == nil {
-				defer resp.Body.Close()
-				if resp.StatusCode == 200 {
-					if debug {
-						body, _ := io.ReadAll(resp.Body)
-						debugInfo += fmt.Sprintf("Metadata access successful via IP! Response:\n%s\n", string(body))
-					}
-					metadataAccess = true
+				resp.Body.Close()
+				if resp.StatusCode == http.StatusOK {
+					return provider.Name, true, true, nil
+				}
+			}
+		}
+
+		// Check internal ranges
+		for _, ipRange := range provider.InternalRanges {
+			// Try to access internal IP
+			internalURL := fmt.Sprintf("http://%s/", ipRange)
+			req, err := http.NewRequest("GET", internalURL, nil)
+			if err != nil {
+				continue
+			}
+			resp, err := client.Do(req)
+			if err == nil {
+				resp.Body.Close()
+				if resp.StatusCode == http.StatusOK {
+					return provider.Name, true, false, nil
+				}
+			}
+		}
+	}
+
+	return "", false, false, nil
+}
+
+func performAdvancedChecks(client *http.Client, proxy string, debug bool) *AdvancedCheckResult {
+	result := &AdvancedCheckResult{
+		MethodSupport:    make(map[string]bool),
+		NonStandardPorts: make(map[int]bool),
+		VulnDetails:      make(map[string]string),
+	}
+
+	// Test HTTP methods
+	if config.Validation.AdvancedChecks.TestHTTPMethods != nil {
+		for _, method := range config.Validation.AdvancedChecks.TestHTTPMethods {
+			req, err := http.NewRequest(method, config.TestURLs.DefaultURL, nil)
+			if err != nil {
+				continue
+			}
+			resp, err := client.Do(req)
+			if err == nil {
+				resp.Body.Close()
+				result.MethodSupport[method] = resp.StatusCode < 400
+			}
+		}
+	}
+
+	// Test path traversal if enabled
+	if config.Validation.AdvancedChecks.TestPathTraversal {
+		traversalPaths := []string{
+			"../../../etc/passwd",
+			"..%2f..%2f..%2fetc%2fpasswd",
+			"%2e%2e%2f%2e%2e%2f%2e%2e%2fetc%2fpasswd",
+		}
+
+		for _, path := range traversalPaths {
+			testURL := config.TestURLs.DefaultURL + path
+			req, err := http.NewRequest("GET", testURL, nil)
+			if err != nil {
+				continue
+			}
+			resp, err := client.Do(req)
+			if err == nil {
+				resp.Body.Close()
+				if resp.StatusCode == http.StatusOK {
+					result.PathTraversal = true
+					result.VulnDetails["path_traversal"] = "Possible path traversal vulnerability detected"
 					break
 				}
 			}
 		}
-		if metadataAccess {
-			break
-		}
 	}
 
-	return internalAccess, metadataAccess, debugInfo
-}
-
-func getIPInfo(client *http.Client) (IPInfoResponse, error) {
-	req, err := http.NewRequest("GET", "https://ipinfo.io/json", nil)
-	if err != nil {
-		return IPInfoResponse{}, err
-	}
-
-	// Add headers
-	if config.UserAgent != "" {
-		req.Header.Set("User-Agent", config.UserAgent)
-	}
-	for key, value := range config.DefaultHeaders {
-		req.Header.Set(key, value)
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return IPInfoResponse{}, err
-	}
-	defer resp.Body.Close()
-
-	var ipInfo IPInfoResponse
-	if err := json.NewDecoder(resp.Body).Decode(&ipInfo); err != nil {
-		return IPInfoResponse{}, err
-	}
-	return ipInfo, nil
-}
-
-func createProxyClient(proxyURL *url.URL, timeout time.Duration) (*http.Client, error) {
-	transport := &http.Transport{
-		TLSHandshakeTimeout:   timeout / 2,
-		ResponseHeaderTimeout: timeout / 2,
-		ExpectContinueTimeout: 1 * time.Second,
-		MaxIdleConns:          100,
-		MaxIdleConnsPerHost:   10,
-		IdleConnTimeout:       90 * time.Second,
-		DisableKeepAlives:     true,  // Disable keep-alives to prevent hanging connections
-		ForceAttemptHTTP2:     false, // Disable HTTP/2 for better compatibility
-	}
-
-	// Create a dialer with timeout
-	baseDialer := &net.Dialer{
-		Timeout:   timeout / 2, // Use half the timeout for connection establishment
-		KeepAlive: -1,          // Disable keep-alive
-	}
-
-	switch proxyURL.Scheme {
-	case "http", "https":
-		transport.Proxy = http.ProxyURL(proxyURL)
-		transport.DialContext = baseDialer.DialContext
-	case "socks4", "socks5":
-		// Handle both SOCKS4 and SOCKS5
-		var auth *proxy.Auth
-		if proxyURL.User != nil {
-			password, _ := proxyURL.User.Password()
-			auth = &proxy.Auth{
-				User:     proxyURL.User.Username(),
-				Password: password,
+	// Test IPv6 support if enabled
+	if config.Validation.AdvancedChecks.TestIPv6 {
+		// Try to resolve proxy host to IPv6
+		proxyURL, err := url.Parse(proxy)
+		if err == nil {
+			host := proxyURL.Hostname()
+			ips, err := net.LookupIP(host)
+			if err == nil {
+				for _, ip := range ips {
+					if ip.To4() == nil {
+						result.IPv6Supported = true
+						break
+					}
+				}
 			}
 		}
-
-		// Try SOCKS5 first, then fallback to SOCKS4 if needed
-		dialer, err := proxy.SOCKS5("tcp", proxyURL.Host, auth, baseDialer)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create SOCKS dialer: %v", err)
-		}
-
-		// Use the SOCKS dialer for all connections
-		transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-			return dialer.Dial(network, addr)
-		}
-	default:
-		return nil, fmt.Errorf("unsupported proxy scheme: %s", proxyURL.Scheme)
 	}
 
-	return &http.Client{
-		Transport: transport,
-		Timeout:   timeout,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 10 {
-				return fmt.Errorf("stopped after 10 redirects")
-			}
-			return nil
-		},
-	}, nil
+	return result
 }
 
-// Add new function to validate proxy response
-func validateProxyResponse(resp *http.Response, body []byte, debug bool) (bool, string) {
-	debugInfo := ""
-
-	if debug {
-		debugInfo += fmt.Sprintf("\nValidating Response:\n")
-		debugInfo += fmt.Sprintf("Status Code: %d\n", resp.StatusCode)
-		debugInfo += fmt.Sprintf("Response Size: %d bytes\n", len(body))
-		debugInfo += fmt.Sprintf("Headers: %v\n", resp.Header)
-		debugInfo += fmt.Sprintf("Body Preview: %s\n", string(body[:min(len(body), 200)]))
+// Update the checkProxyWithInteractsh function to include new checks
+func checkProxyWithInteractsh(proxyURL string, debug bool) ProxyResult {
+	result := ProxyResult{
+		URL:          proxyURL,
+		Working:      false,
+		CheckResults: make([]CheckResult, 0),
 	}
 
-	// 1. Check status code - Accept 200-299 range
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		if debug {
-			debugInfo += fmt.Sprintf("Status code %d is not in 2xx range\n", resp.StatusCode)
-		}
-		return false, debugInfo
-	}
-
-	// 2. Check response size - Reduced minimum size requirement
-	if len(body) < 100 { // Reduced from 512 to 100 bytes
-		if debug {
-			debugInfo += fmt.Sprintf("Response size %d bytes is less than required 100 bytes\n",
-				len(body))
-		}
-		return false, debugInfo
-	}
-
-	// 3. Check for disallowed keywords
-	for _, keyword := range config.Validation.DisallowedKeywords {
-		if strings.Contains(string(body), keyword) {
-			if debug {
-				debugInfo += fmt.Sprintf("Response contains disallowed keyword '%s'\n", keyword)
-			}
-			return false, debugInfo
-		}
-	}
-
-	if debug {
-		debugInfo += "Response validation successful\n"
-	}
-	return true, debugInfo
-}
-
-// Helper function to get minimum of two integers
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-// Modify checkProxyWithInteractsh to use config URLs
-func checkProxyWithInteractsh(proxy string, customURL string, useInteractsh bool, useIPInfo bool, useCloud bool, debug bool, timeout time.Duration, results chan<- ProxyResult) {
 	start := time.Now()
-	debugInfo := ""
-	checkResults := make([]CheckResult, 0)
 
-	if debug {
-		debugInfo += fmt.Sprintf("\nStarting proxy check for: %s\n", proxy)
-		debugInfo += fmt.Sprintf("Target URL: %s\n", customURL)
-		debugInfo += fmt.Sprintf("Timeout: %v\n", timeout)
-	}
-
-	proxyURL, err := url.Parse(proxy)
+	// Create proxy client
+	proxyURLParsed, err := url.Parse(proxyURL)
 	if err != nil {
+		result.Error = err.Error()
 		if debug {
-			debugInfo += fmt.Sprintf("Error parsing proxy URL: %v\n", err)
+			result.DebugInfo = fmt.Sprintf("Error parsing proxy URL: %v\n", err)
 		}
-		results <- ProxyResult{
-			Proxy:     proxy,
-			Working:   false,
-			Error:     fmt.Errorf("invalid proxy URL: %v", err),
-			DebugInfo: debugInfo,
-		}
-		return
+		return result
 	}
 
-	if debug {
-		debugInfo += fmt.Sprintf("Parsed proxy URL - Scheme: %s, Host: %s\n", proxyURL.Scheme, proxyURL.Host)
-		debugInfo += "Creating proxy client...\n"
-	}
-
-	client, err := createProxyClient(proxyURL, timeout)
+	client, err := proxylib.CreateClient(proxyURLParsed, time.Duration(config.Timeout)*time.Second)
 	if err != nil {
+		result.Error = err.Error()
 		if debug {
-			debugInfo += fmt.Sprintf("Error creating proxy client: %v\n", err)
+			result.DebugInfo = fmt.Sprintf("Error creating proxy client: %v\n", err)
 		}
-		results <- ProxyResult{
-			Proxy:     proxy,
-			Working:   false,
-			Error:     fmt.Errorf("failed to create proxy client: %v", err),
-			DebugInfo: debugInfo,
-		}
-		return
+		return result
 	}
 
-	// Define test URLs
-	testURLs := []string{
-		customURL,
-		"http://example.com",
-		"http://httpbin.org/ip",
-		"http://httpbin.org/get",
-		"http://httpbin.org/headers",
+	// Test all configured URLs
+	successfulChecks := 0
+
+	// If no URLs are configured but we have a default URL, use it
+	if len(config.TestURLs.URLs) == 0 && config.TestURLs.DefaultURL != "" {
+		config.TestURLs.URLs = []TestURL{
+			{
+				URL:         config.TestURLs.DefaultURL,
+				Description: "Default test URL",
+				Required:    true,
+			},
+		}
+	} else if len(config.TestURLs.URLs) == 0 {
+		result.Error = "No test URLs configured"
+		if debug {
+			result.DebugInfo = "Error: No test URLs configured\n"
+		}
+		return result
 	}
 
-	successCount := 0
-	totalChecks := len(testURLs)
-
-	for _, testURL := range testURLs {
+	// Test each configured URL
+	for _, testURL := range config.TestURLs.URLs {
 		checkStart := time.Now()
 		if debug {
-			debugInfo += fmt.Sprintf("\nTesting URL: %s\n", testURL)
+			result.DebugInfo += fmt.Sprintf("\nTesting URL: %s\n", testURL.URL)
 		}
 
-		req, err := http.NewRequest("GET", testURL, nil)
+		req, err := http.NewRequest("GET", testURL.URL, nil)
 		if err != nil {
-			checkResults = append(checkResults, CheckResult{
-				URL:     testURL,
+			if debug {
+				result.DebugInfo += fmt.Sprintf("Failed to create request: %v\n", err)
+			}
+			result.CheckResults = append(result.CheckResults, CheckResult{
+				URL:     testURL.URL,
 				Success: false,
-				Error:   err.Error(),
+				Speed:   time.Since(checkStart),
+				Error:   fmt.Sprintf("Failed to create request: %v", err),
 			})
 			continue
 		}
 
-		// Add headers
-		if config.UserAgent != "" {
-			req.Header.Set("User-Agent", config.UserAgent)
-		}
+		// Add configured headers
+		req.Header.Set("User-Agent", config.UserAgent)
 		for key, value := range config.DefaultHeaders {
 			req.Header.Set(key, value)
+		}
+
+		if debug {
+			result.DebugInfo += "Request Headers:\n"
+			for key, values := range req.Header {
+				result.DebugInfo += fmt.Sprintf("  %s: %s\n", key, values)
+			}
 		}
 
 		resp, err := client.Do(req)
 		if err != nil {
 			if debug {
-				debugInfo += fmt.Sprintf("Request failed: %v\n", err)
+				result.DebugInfo += fmt.Sprintf("Request failed: %v\n", err)
 			}
-			checkResults = append(checkResults, CheckResult{
-				URL:     testURL,
+			result.CheckResults = append(result.CheckResults, CheckResult{
+				URL:     testURL.URL,
 				Success: false,
 				Speed:   time.Since(checkStart),
-				Error:   err.Error(),
+				Error:   fmt.Sprintf("Request failed: %v", err),
 			})
 			continue
 		}
@@ -1066,42 +1451,118 @@ func checkProxyWithInteractsh(proxy string, customURL string, useInteractsh bool
 		resp.Body.Close()
 
 		if err != nil {
-			checkResults = append(checkResults, CheckResult{
-				URL:        testURL,
+			if debug {
+				result.DebugInfo += fmt.Sprintf("Failed to read response body: %v\n", err)
+			}
+			result.CheckResults = append(result.CheckResults, CheckResult{
+				URL:        testURL.URL,
 				Success:    false,
 				Speed:      time.Since(checkStart),
-				Error:      err.Error(),
+				Error:      fmt.Sprintf("Failed to read response: %v", err),
 				StatusCode: resp.StatusCode,
 			})
 			continue
 		}
 
-		valid, validationDebug := validateProxyResponse(resp, body, debug)
-		debugInfo += validationDebug
+		if debug {
+			result.DebugInfo += fmt.Sprintf("Response Status: %s\n", resp.Status)
+			result.DebugInfo += "Response Headers:\n"
+			for key, values := range resp.Header {
+				result.DebugInfo += fmt.Sprintf("  %s: %s\n", key, values)
+			}
+			result.DebugInfo += fmt.Sprintf("Response Body Size: %d bytes\n", len(body))
+			if len(body) > 200 {
+				result.DebugInfo += fmt.Sprintf("Response Body Preview: %s...\n", body[:200])
+			} else {
+				result.DebugInfo += fmt.Sprintf("Response Body: %s\n", body)
+			}
+		}
 
-		checkResults = append(checkResults, CheckResult{
-			URL:        testURL,
+		// Validate response
+		valid, validationDebug := proxylib.ValidateResponse(resp, body, &proxylib.Config{
+			MinResponseBytes:   config.Validation.MinResponseBytes,
+			DisallowedKeywords: config.Validation.DisallowedKeywords,
+		}, debug)
+
+		if debug {
+			result.DebugInfo += fmt.Sprintf("\nValidation Results for %s:\n%s\n", testURL.URL, validationDebug)
+		}
+
+		checkResult := CheckResult{
+			URL:        testURL.URL,
 			Success:    valid,
 			Speed:      time.Since(checkStart),
 			StatusCode: resp.StatusCode,
 			BodySize:   int64(len(body)),
-		})
+		}
 
-		if valid {
-			successCount++
+		if !valid {
+			checkResult.Error = "Response validation failed"
+		} else {
+			successfulChecks++
+		}
+
+		result.CheckResults = append(result.CheckResults, checkResult)
+	}
+
+	// Only mark as working if we met the minimum required successful checks
+	// This happens after all checks are completed
+	if successfulChecks >= config.TestURLs.RequiredSuccessCount {
+		result.Working = true
+	}
+
+	result.Speed = time.Since(start)
+	if debug {
+		result.DebugInfo += fmt.Sprintf("\nTotal Time: %v\n", result.Speed)
+		result.DebugInfo += fmt.Sprintf("Successful Checks: %d/%d\n", successfulChecks, len(config.TestURLs.URLs))
+	}
+
+	// Add anonymity check
+	isAnonymous := false
+	var realIP, proxyIP string
+	if config.EnableAnonymityCheck {
+		anonymous, rIP, pIP, err := checkProxyAnonymity(client, debug)
+		if err == nil {
+			isAnonymous = anonymous
+			realIP = rIP
+			proxyIP = pIP
 		}
 	}
 
-	// Consider the proxy working if it succeeds with at least 50% of the URLs
-	working := float64(successCount)/float64(totalChecks) >= 0.5
-
-	results <- ProxyResult{
-		Proxy:        proxy,
-		Working:      working,
-		Speed:        time.Since(start),
-		DebugInfo:    debugInfo,
-		CheckResults: checkResults,
+	// Add cloud provider check
+	var cloudProvider string
+	var internalAccess, metadataAccess bool
+	if config.EnableCloudChecks {
+		provider, internal, metadata, err := checkCloudProvider(client, proxyURL, debug)
+		if err == nil {
+			cloudProvider = provider
+			internalAccess = internal
+			metadataAccess = metadata
+		}
 	}
+
+	// Add advanced security checks
+	var advancedChecks *AdvancedCheckResult
+	if config.Validation.AdvancedChecks.TestProtocolSmuggling ||
+		config.Validation.AdvancedChecks.TestDNSRebinding ||
+		config.Validation.AdvancedChecks.TestIPv6 ||
+		len(config.Validation.AdvancedChecks.TestHTTPMethods) > 0 ||
+		config.Validation.AdvancedChecks.TestPathTraversal ||
+		config.Validation.AdvancedChecks.TestCachePoisoning ||
+		config.Validation.AdvancedChecks.TestHostHeaderInjection {
+		advancedChecks = performAdvancedChecks(client, proxyURL, debug)
+	}
+
+	// Update result with new check information
+	result.IsAnonymous = isAnonymous
+	result.RealIP = realIP
+	result.ProxyIP = proxyIP
+	result.CloudProvider = cloudProvider
+	result.InternalAccess = internalAccess
+	result.MetadataAccess = metadataAccess
+	result.AdvancedChecks = advancedChecks
+
+	return result
 }
 
 // Add new function for writing working proxies output
@@ -1230,16 +1691,13 @@ func writeTextOutput(filename string, results []ProxyResultOutput, summary Summa
 
 	// Write results
 	for _, result := range results {
-		status := successStyle.Render("✓")
+		// Write main proxy line with status
+		status := "✓"
 		if !result.Working {
-			status = errorStyle.Render("✗")
-		} else if result.IsAnonymous {
-			status = anonymousStyle.Render("🔒")
-		} else if result.CloudProvider != "" {
-			status = cloudStyle.Render("☁")
+			status = "✗"
 		}
 
-		// Write main proxy line with summary
+		// Calculate check summary
 		successCount := 0
 		totalChecks := len(result.CheckResults)
 		totalTime := time.Duration(0)
@@ -1259,9 +1717,9 @@ func writeTextOutput(filename string, results []ProxyResultOutput, summary Summa
 
 		// Write individual check results
 		for _, check := range result.CheckResults {
-			checkStatus := successStyle.Render("✓")
+			checkStatus := "✓"
 			if !check.Success {
-				checkStatus = errorStyle.Render("✗")
+				checkStatus = "✗"
 			}
 			details := fmt.Sprintf("Status: %d, Speed: %v", check.StatusCode, check.Speed.Round(time.Millisecond))
 			if check.Error != "" {
@@ -1269,21 +1727,39 @@ func writeTextOutput(filename string, results []ProxyResultOutput, summary Summa
 			}
 			fmt.Fprintf(w, "  %s %s - %s\n", checkStatus, check.URL, details)
 		}
+
+		// Add additional details if available
+		if result.RealIP != "" {
+			fmt.Fprintf(w, "  Real IP: %s\n", result.RealIP)
+		}
+		if result.ProxyIP != "" {
+			fmt.Fprintf(w, "  Proxy IP: %s\n", result.ProxyIP)
+		}
+		if result.CloudProvider != "" {
+			fmt.Fprintf(w, "  Cloud Provider: %s\n", result.CloudProvider)
+		}
+		if result.Error != "" {
+			fmt.Fprintf(w, "  Error: %s\n", result.Error)
+		}
 		fmt.Fprintln(w) // Add blank line between proxies
 	}
 
-	// Write summary
+	// Write summary with more details
 	fmt.Fprintln(w, "\nSummary:")
 	fmt.Fprintf(w, "Total proxies checked: %d\n", summary.TotalProxies)
-	fmt.Fprintf(w, "Working proxies (HTTP): %d\n", summary.WorkingProxies)
+	fmt.Fprintf(w, "Working proxies: %d\n", summary.WorkingProxies)
+	fmt.Fprintf(w, "Failed proxies: %d\n", summary.TotalProxies-summary.WorkingProxies)
 	if summary.InteractshProxies > 0 {
-		fmt.Fprintf(w, "Working proxies (Interactsh): %d\n", summary.InteractshProxies)
+		fmt.Fprintf(w, "Interactsh proxies: %d\n", summary.InteractshProxies)
 	}
 	if summary.AnonymousProxies > 0 {
 		fmt.Fprintf(w, "Anonymous proxies: %d\n", summary.AnonymousProxies)
 	}
 	if summary.CloudProxies > 0 {
 		fmt.Fprintf(w, "Cloud provider proxies: %d\n", summary.CloudProxies)
+	}
+	if summary.InternalAccessCount > 0 {
+		fmt.Fprintf(w, "Internal access capable: %d\n", summary.InternalAccessCount)
 	}
 	fmt.Fprintf(w, "Success rate: %.2f%%\n", summary.SuccessRate)
 
@@ -1303,206 +1779,118 @@ type AdvancedCheckResult struct {
 	VulnDetails         map[string]string `json:"vuln_details"`
 }
 
-// Add function declarations for advanced checks
-var (
-	checkProtocolSmuggling   func(client *http.Client, debug bool) (bool, string)
-	checkDNSRebinding        func(client *http.Client, debug bool) (bool, string)
-	checkCachePoisoning      func(client *http.Client, debug bool) (bool, string)
-	checkHostHeaderInjection func(client *http.Client, debug bool) (bool, string)
-)
-
-// Add performAdvancedChecks function
-func performAdvancedChecks(client *http.Client, debug bool) (*AdvancedCheckResult, string) {
-	debugInfo := ""
-	result := &AdvancedCheckResult{
-		VulnDetails: make(map[string]string),
+// Helper function to get status indicator
+func getStatusIndicator(status *CheckStatus) string {
+	successCount := 0
+	for _, check := range status.CheckResults {
+		if check.Success {
+			successCount++
+		}
 	}
 
-	if config.Validation.AdvancedChecks.TestProtocolSmuggling {
-		result.ProtocolSmuggling, debugInfo = checkProtocolSmuggling(client, debug)
+	if len(status.CheckResults) == 0 {
+		return lipgloss.NewStyle().
+			Foreground(lipgloss.Color("244")).
+			Render("CHECKING")
+	} else if successCount == 0 && len(status.CheckResults) == len(config.TestURLs.URLs) {
+		return errorStyle.Render("FAILED")
+	} else if successCount == len(config.TestURLs.URLs) {
+		return successStyle.Render("SUCCESS")
+	} else if len(status.CheckResults) == len(config.TestURLs.URLs) {
+		return warningStyle.Render("PARTIAL")
 	}
-
-	if config.Validation.AdvancedChecks.TestDNSRebinding {
-		result.DNSRebinding, debugInfo = checkDNSRebinding(client, debug)
-	}
-
-	if config.Validation.AdvancedChecks.TestCachePoisoning {
-		result.CachePoisoning, debugInfo = checkCachePoisoning(client, debug)
-	}
-
-	if config.Validation.AdvancedChecks.TestHostHeaderInjection {
-		result.HostHeaderInjection, debugInfo = checkHostHeaderInjection(client, debug)
-	}
-
-	return result, debugInfo
+	return lipgloss.NewStyle().
+		Foreground(lipgloss.Color("244")).
+		Render("CHECKING")
 }
 
+// Helper function to get check count with appropriate styling
+func getCheckCount(status *CheckStatus) string {
+	successCount := 0
+	for _, check := range status.CheckResults {
+		if check.Success {
+			successCount++
+		}
+	}
+
+	style := errorStyle
+	if successCount > 0 {
+		if successCount == len(config.TestURLs.URLs) {
+			style = successStyle
+		} else {
+			style = warningStyle
+		}
+	}
+	return style.Render(fmt.Sprintf("%d/%d", successCount, len(config.TestURLs.URLs)))
+}
+
+// Add the main function at the end of the file
 func main() {
-	var (
-		// Input options
-		proxyList   = flag.String("l", "", "File containing proxy list (one per line)")
-		singleProxy = flag.String("proxy", "", "Test a single proxy (e.g., http://proxy:port, socks5://proxy:port)")
-
-		// Test options
-		testURL     = flag.String("u", "https://www.google.com", "URL to test proxy against")
-		timeout     = flag.Duration("t", 10*time.Second, "Timeout for each proxy check")
-		concurrency = flag.Int("c", 10, "Number of concurrent proxy checks")
-
-		// Validation options
-		useInteractsh = flag.Bool("i", false, "Use Interactsh for additional validation")
-		useIPInfo     = flag.Bool("p", false, "Use IPInfo to check proxy anonymity")
-		useCloud      = flag.Bool("cloud", false, "Enable cloud provider detection and internal network testing")
-
-		// Header options
-		configFile = flag.String("config", "config.yaml", "Path to configuration file")
-		userAgent  = flag.String("ua", "", "Custom User-Agent header (overrides config file)")
-		headers    = flag.String("H", "", "Additional headers in format 'Key1:Value1,Key2:Value2'")
-
-		// Output options
-		debug      = flag.Bool("d", false, "Enable debug output")
-		outputFile = flag.String("o", "", "Output file for results in text format")
-		jsonFile   = flag.String("j", "", "Output file for results in JSON format")
-		wpFile     = flag.String("wp", "", "Output file for working proxies only")
-		wpaFile    = flag.String("wpa", "", "Output file for working anonymous proxies only")
-	)
-
+	// Parse command line flags
+	proxyList := flag.String("l", "", "File containing list of proxies")
+	verbose := flag.Bool("v", false, "Enable verbose output with detailed progress")
+	debug := flag.Bool("d", false, "Enable debug mode with request/response data")
+	concurrency := flag.Int("c", 10, "Number of concurrent checks")
+	timeout := flag.Int("t", 10, "Timeout in seconds")
+	outputFile := flag.String("o", "", "Output file for results (text format)")
+	workingProxiesFile := flag.String("wp", "", "Output file for working proxies")
+	jsonOutputFile := flag.String("j", "", "Output file for results (JSON format)")
+	configFile := flag.String("config", "config.yaml", "Path to config file")
 	flag.Parse()
 
-	// Always load config file for headers
+	// Load configuration
 	if err := loadConfig(*configFile); err != nil {
-		fmt.Println(warningStyle.Render(fmt.Sprintf("Warning: Error loading configuration: %v. Using default headers.", err)))
-		// Initialize default headers if config loading fails
-		config.DefaultHeaders = map[string]string{
-			"Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-			"Accept-Language": "en-US,en;q=0.9",
-			"Accept-Encoding": "gzip, deflate",
-			"Connection":      "keep-alive",
-			"Cache-Control":   "no-cache",
-			"Pragma":          "no-cache",
-		}
-		config.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-	}
-
-	if *useCloud {
-		fmt.Println(infoStyle.Render(fmt.Sprintf("Loaded %d cloud provider configurations", len(config.CloudProviders))))
-	}
-
-	// Override User-Agent from command line if specified
-	if *userAgent != "" {
-		config.UserAgent = *userAgent
-	}
-
-	// Parse and add additional headers from command line
-	if *headers != "" {
-		if config.DefaultHeaders == nil {
-			config.DefaultHeaders = make(map[string]string)
-		}
-		headerPairs := strings.Split(*headers, ",")
-		for _, pair := range headerPairs {
-			parts := strings.SplitN(pair, ":", 2)
-			if len(parts) == 2 {
-				config.DefaultHeaders[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
-			}
-		}
-	}
-
-	if *testURL == "" {
-		*testURL = "https://www.google.com" // Default URL if none specified
-	}
-
-	// Validate test URL
-	parsedURL, urlErr := url.Parse(*testURL)
-	if urlErr != nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
-		fmt.Println(errorStyle.Render(fmt.Sprintf("Invalid test URL: %v. Using https://www.google.com", urlErr)))
-		*testURL = "https://www.google.com"
-	}
-
-	var proxies []string
-	var warnings []string
-	var err error
-
-	// Handle single proxy test
-	if *singleProxy != "" {
-		// Validate the single proxy URL
-		if _, err := url.Parse(*singleProxy); err != nil {
-			fmt.Println(errorStyle.Render(fmt.Sprintf("Invalid proxy URL: %v", err)))
-			os.Exit(1)
-		}
-		proxies = []string{*singleProxy}
-	} else if *proxyList != "" {
-		// Load proxies from file
-		proxies, warnings, err = loadProxies(*proxyList)
-		if err != nil {
-			fmt.Println(errorStyle.Render(fmt.Sprintf("Error loading proxies: %v", err)))
-			os.Exit(1)
-		}
-	} else {
-		fmt.Println(errorStyle.Render("Please provide either a proxy list file (-l) or a single proxy (--proxy)"))
-		flag.Usage()
+		fmt.Printf("Error loading config: %v\n", err)
 		os.Exit(1)
 	}
 
-	if len(proxies) == 0 {
-		fmt.Println(errorStyle.Render("No proxies to check"))
-		os.Exit(1)
-	}
-
-	// Print warnings if any
-	if len(warnings) > 0 {
-		fmt.Println(warningStyle.Render("\nProxy loading warnings:"))
-		for _, warning := range warnings {
-			fmt.Println(warningStyle.Render(warning))
-		}
-		fmt.Println()
-	}
-
-	// Print header
-	header := []string{
-		fmt.Sprintf("Starting to check %d %s...", len(proxies),
-			map[bool]string{true: "proxy", false: "proxies"}[len(proxies) == 1]),
-	}
-	if *useInteractsh {
-		header = append(header, "Interactsh validation enabled")
-	}
-	if *useIPInfo {
-		header = append(header, "IPInfo validation enabled")
-	}
-	if *useCloud {
-		header = append(header, "Cloud provider detection enabled")
-	}
-	if *debug {
-		header = append(header, "Debug output enabled")
-	}
-
-	fmt.Println(headerStyle.Render(strings.Join(header, "\n")))
-
-	// Initialize and run the TUI
-	model := checkProxiesWithProgress(proxies, *testURL, *useInteractsh, *useIPInfo, *useCloud, *debug, *timeout, *concurrency)
-	program = tea.NewProgram(model)
-	finalModel, err := program.Run()
+	// Load proxies
+	proxies, warnings, err := loadProxies(*proxyList)
 	if err != nil {
-		fmt.Println(errorStyle.Render(fmt.Sprintf("Error running program: %v", err)))
+		fmt.Printf("Error loading proxies: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Process final results
-	m := finalModel.(Model)
-	workingCount := 0
+	// Print any warnings
+	for _, warning := range warnings {
+		fmt.Printf("Warning: %s\n", warning)
+	}
+
+	// Create and start the bubble tea program
+	p := tea.NewProgram(checkProxiesWithProgress(
+		proxies,
+		"",
+		false,
+		false,
+		false,
+		*verbose,
+		*debug, // Pass debug flag
+		time.Duration(*timeout)*time.Second,
+		*concurrency,
+	))
+	program = p
+
+	// Run the program
+	model, err := p.Run()
+	if err != nil {
+		fmt.Printf("Error running program: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Get results from model
+	m := model.(Model)
+	if m.err != nil {
+		fmt.Printf("Error during execution: %v\n", m.err)
+		os.Exit(1)
+	}
+
+	// Calculate summary
+	var summary SummaryOutput
+	summary.TotalProxies = len(proxies)
 	for _, result := range m.results {
 		if result.Working {
-			workingCount++
+			summary.WorkingProxies++
 		}
-	}
-
-	summary := SummaryOutput{
-		TotalProxies:   m.total,
-		Results:        m.results,
-		WorkingProxies: workingCount,
-		SuccessRate:    float64(workingCount) / float64(m.total) * 100,
-	}
-
-	// Count various types
-	for _, result := range m.results {
 		if result.InteractshTest {
 			summary.InteractshProxies++
 		}
@@ -1510,58 +1898,38 @@ func main() {
 			summary.AnonymousProxies++
 		}
 		if result.CloudProvider != "" {
+			summary.CloudProxies++
+		}
+		if result.InternalAccess {
 			summary.InternalAccessCount++
 		}
 	}
+	if summary.TotalProxies > 0 {
+		summary.SuccessRate = float64(summary.WorkingProxies) / float64(summary.TotalProxies) * 100
+	}
+	summary.Results = m.results
 
 	// Write output files if specified
 	if *outputFile != "" {
 		if err := writeTextOutput(*outputFile, m.results, summary); err != nil {
-			fmt.Println(errorStyle.Render(fmt.Sprintf("Error writing text output: %v", err)))
-		} else {
-			fmt.Println(infoStyle.Render(fmt.Sprintf("Results written to %s", *outputFile)))
+			fmt.Printf("Error writing text output: %v\n", err)
 		}
 	}
 
-	if *jsonFile != "" {
+	if *workingProxiesFile != "" {
+		if err := writeWorkingProxiesOutput(*workingProxiesFile, m.results); err != nil {
+			fmt.Printf("Error writing working proxies: %v\n", err)
+		}
+	}
+
+	if *jsonOutputFile != "" {
 		jsonData, err := json.MarshalIndent(summary, "", "  ")
 		if err != nil {
-			fmt.Println(errorStyle.Render(fmt.Sprintf("Error creating JSON output: %v", err)))
-		} else if err := os.WriteFile(*jsonFile, jsonData, 0644); err != nil {
-			fmt.Println(errorStyle.Render(fmt.Sprintf("Error writing JSON file: %v", err)))
+			fmt.Printf("Error creating JSON output: %v\n", err)
 		} else {
-			fmt.Println(infoStyle.Render(fmt.Sprintf("Results written to %s", *jsonFile)))
+			if err := os.WriteFile(*jsonOutputFile, jsonData, 0644); err != nil {
+				fmt.Printf("Error writing JSON output: %v\n", err)
+			}
 		}
 	}
-
-	if *wpFile != "" {
-		if err := writeWorkingProxiesOutput(*wpFile, m.results); err != nil {
-			fmt.Println(errorStyle.Render(fmt.Sprintf("Error writing working proxies output: %v", err)))
-		} else {
-			fmt.Println(infoStyle.Render(fmt.Sprintf("Working proxies written to %s", *wpFile)))
-		}
-	}
-
-	if *wpaFile != "" {
-		if err := writeWorkingAnonymousProxiesOutput(*wpaFile, m.results); err != nil {
-			fmt.Println(errorStyle.Render(fmt.Sprintf("Error writing working anonymous proxies output: %v", err)))
-		} else {
-			fmt.Println(infoStyle.Render(fmt.Sprintf("Working anonymous proxies written to %s", *wpaFile)))
-		}
-	}
-
-	// Print final summary with style
-	fmt.Println("\n" + headerStyle.Render("Summary"))
-	fmt.Printf("%s: %d\n", infoStyle.Render("Total proxies checked"), summary.TotalProxies)
-	fmt.Printf("%s: %d\n", successStyle.Render("Working proxies (HTTP)"), summary.WorkingProxies)
-	if *useInteractsh {
-		fmt.Printf("%s: %d\n", successStyle.Render("Working proxies (Interactsh)"), summary.InteractshProxies)
-	}
-	if *useIPInfo {
-		fmt.Printf("%s: %d\n", anonymousStyle.Render("Anonymous proxies"), summary.AnonymousProxies)
-	}
-	if *useCloud {
-		fmt.Printf("%s: %d\n", cloudStyle.Render("Cloud provider proxies"), summary.InternalAccessCount)
-	}
-	fmt.Printf("%s: %.2f%%\n", infoStyle.Render("Success rate"), summary.SuccessRate)
 }

@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"proxycheck/testhelpers"
-	"proxycheck/tests/config"
+	testconfig "github.com/ResistanceIsUseless/ProxyCheck/tests/config"
+	"github.com/ResistanceIsUseless/ProxyCheck/tests/testhelpers"
 )
 
 // proxyHandler implements a simple HTTP proxy
@@ -122,7 +122,6 @@ https://proxy6.example.com
 			Name:    "Proxy Count Check",
 			Passed:  false,
 			Message: fmt.Sprintf("Got %d proxies, want %d", len(proxies), len(expected)),
-			Details: []string{fmt.Sprintf("Actual proxies: %v", proxies)},
 		})
 	} else {
 		progress.AddResult(testhelpers.TestResult{
@@ -147,8 +146,7 @@ https://proxy6.example.com
 		progress.AddResult(testhelpers.TestResult{
 			Name:    "Proxy Format Check",
 			Passed:  false,
-			Message: "Proxy format mismatch",
-			Details: formatErrors,
+			Message: "Proxy format mismatch: " + strings.Join(formatErrors, ", "),
 		})
 	} else {
 		progress.AddResult(testhelpers.TestResult{
@@ -159,11 +157,10 @@ https://proxy6.example.com
 
 	// Check SOCKS warnings
 	foundSocksWarning := false
-	var foundWarnings []string
 	for _, warning := range warnings {
-		foundWarnings = append(foundWarnings, warning)
 		if strings.Contains(warning, "Warning: skipping unsupported scheme 'socks' for proxy") {
 			foundSocksWarning = true
+			break
 		}
 	}
 
@@ -171,7 +168,6 @@ https://proxy6.example.com
 		Name:    "SOCKS Warning Check",
 		Passed:  foundSocksWarning,
 		Message: "SOCKS proxy warning check",
-		Details: foundWarnings,
 	})
 }
 
@@ -182,7 +178,7 @@ func TestProxyCheckingBasic(t *testing.T) {
 	progress.StartTest("Basic Proxy Checking")
 
 	// Load default config for testing
-	if err := config.LoadConfig("../../config.yaml"); err != nil {
+	if err := testconfig.LoadTestConfig("../../config.yaml"); err != nil {
 		progress.AddResult(testhelpers.TestResult{
 			Name:    "Config Loading",
 			Passed:  false,
@@ -207,8 +203,7 @@ func TestProxyCheckingBasic(t *testing.T) {
 <h1>Test Response</h1>
 <p>This is a test response that meets the minimum size requirements.</p>
 <p>Additional content to ensure we have enough bytes for validation.</p>
-</body>
-</html>`))
+</body></html>`))
 	}))
 	defer targetServer.Close()
 
@@ -237,26 +232,12 @@ func TestProxyCheckingBasic(t *testing.T) {
 			Name:    "Working Proxy",
 			Passed:  false,
 			Message: fmt.Sprintf("Proxy check failed: %v", result.Error),
-			Details: func() []string {
-				var details []string
-				if len(result.CheckResults) > 0 {
-					for _, check := range result.CheckResults {
-						details = append(details,
-							fmt.Sprintf("URL: %s, Success: %v, Error: %s",
-								check.URL, check.Success, check.Error))
-					}
-				}
-				return details
-			}(),
 		})
 	} else {
 		progress.AddResult(testhelpers.TestResult{
-			Name:   "Working Proxy",
-			Passed: true,
-			Details: []string{
-				fmt.Sprintf("Response time: %v", result.Speed),
-				fmt.Sprintf("Successful checks: %d", len(result.CheckResults)),
-			},
+			Name:    "Working Proxy",
+			Passed:  true,
+			Message: fmt.Sprintf("Response time: %v, Successful checks: %d", result.Speed, len(result.CheckResults)),
 		})
 	}
 
@@ -277,11 +258,9 @@ func TestProxyCheckingBasic(t *testing.T) {
 		})
 	} else {
 		progress.AddResult(testhelpers.TestResult{
-			Name:   "Invalid Proxy",
-			Passed: true,
-			Details: []string{
-				fmt.Sprintf("Error: %v", result.Error),
-			},
+			Name:    "Invalid Proxy",
+			Passed:  true,
+			Message: fmt.Sprintf("Error: %v", result.Error),
 		})
 	}
 }

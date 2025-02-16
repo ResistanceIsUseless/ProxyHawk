@@ -138,4 +138,5 @@ require (
 	google.golang.org/protobuf v1.33.0 // indirect
 	gopkg.in/corvus-ch/zbase32.v1 v1.0.0 // indirect
 	gopkg.in/djherbis/times.v1 v1.3.0 // indirect
+	h12.io/socks v1.0.3 // indirect
 )

@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"bufio"
+	"crypto/tls"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -148,12 +149,18 @@ func checkProxyWithInteractsh(proxy string, targetURL string, useInteractsh bool
 	}
 
 	// Create a test client with the proxy
-	transport := &http.Transport{
-		Proxy: http.ProxyURL(proxyURL),
-	}
 	client := &http.Client{
-		Transport: transport,
-		Timeout:   timeout,
+		Timeout: 5 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+		Transport: &http.Transport{
+			DisableKeepAlives: true,
+			Proxy:             http.ProxyURL(proxyURL),
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true,
+			},
+		},
 	}
 
 	// Make a test request

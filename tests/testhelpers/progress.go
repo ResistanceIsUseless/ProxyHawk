@@ -2,90 +2,93 @@ package testhelpers
 
 import (
 	"fmt"
-	"strings"
+	"sync"
+	"time"
 )
 
-// TestProgress tracks test progress and results
-type TestProgress struct {
-	totalTests   int
-	passedTests  int
-	failedTests  int
-	skippedTests int
-	currentTest  string
-	testResults  []TestResult
+// TestResult represents the result of a single test
+type TestResult struct {
+	Name      string
+	Passed    bool
+	Message   string
+	StartTime time.Time
+	EndTime   time.Time
 }
 
-// TestResult represents a single test result
-type TestResult struct {
-	Name    string
-	Passed  bool
-	Skipped bool
-	Message string
-	Details []string
+// TestProgress tracks the progress of multiple tests
+type TestProgress struct {
+	mu       sync.Mutex
+	results  []TestResult
+	current  *TestResult
+	started  time.Time
+	finished time.Time
 }
 
 // NewTestProgress creates a new test progress tracker
 func NewTestProgress() *TestProgress {
-	return &TestProgress{}
+	return &TestProgress{
+		results: make([]TestResult, 0),
+		started: time.Now(),
+	}
 }
 
-// StartTest starts a new test with the given name
-func (tp *TestProgress) StartTest(name string) {
-	tp.currentTest = name
-	fmt.Printf("\n%s %s\n", infoStyle.Render("Running:"), name)
+// StartTest begins tracking a new test
+func (p *TestProgress) StartTest(name string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.current = &TestResult{
+		Name:      name,
+		StartTime: time.Now(),
+	}
 }
 
 // AddResult adds a test result
-func (tp *TestProgress) AddResult(result TestResult) {
-	tp.testResults = append(tp.testResults, result)
-	if result.Skipped {
-		tp.skippedTests++
-	} else if result.Passed {
-		tp.passedTests++
-	} else {
-		tp.failedTests++
-	}
+func (p *TestProgress) AddResult(result TestResult) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 
-	// Print immediate result
-	status := successStyle.Render("✓ PASS")
-	if result.Skipped {
-		status = warningStyle.Render("⚠ SKIP")
-	} else if !result.Passed {
-		status = errorStyle.Render("✗ FAIL")
-	}
-
-	fmt.Printf("  %s %s\n", status, result.Name)
-	if result.Message != "" {
-		fmt.Printf("    %s\n", detailStyle.Render(result.Message))
-	}
-	for _, detail := range result.Details {
-		fmt.Printf("      %s\n", detailStyle.Render(detail))
+	if p.current != nil {
+		p.current.EndTime = time.Now()
+		p.current.Passed = result.Passed
+		p.current.Message = result.Message
+		p.results = append(p.results, *p.current)
+		p.current = nil
 	}
 }
 
-// PrintSummary prints the test summary
-func (tp *TestProgress) PrintSummary() {
-	total := tp.passedTests + tp.failedTests + tp.skippedTests
-	fmt.Printf("\n%s\n", strings.Repeat("─", 50))
-	fmt.Printf("%s\n", infoStyle.Render("Test Summary:"))
-	fmt.Printf("Total Tests: %d\n", total)
-	fmt.Printf("  %s: %d\n", successStyle.Render("Passed"), tp.passedTests)
-	fmt.Printf("  %s: %d\n", errorStyle.Render("Failed"), tp.failedTests)
-	fmt.Printf("  %s: %d\n", warningStyle.Render("Skipped"), tp.skippedTests)
-	fmt.Printf("%s\n", strings.Repeat("─", 50))
+// PrintSummary prints a summary of all test results
+func (p *TestProgress) PrintSummary() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 
-	if tp.failedTests > 0 {
-		fmt.Printf("\n%s\n", errorStyle.Render("Failed Tests:"))
-		for _, result := range tp.testResults {
-			if !result.Passed && !result.Skipped {
-				fmt.Printf("✗ %s\n", result.Name)
-				if result.Message != "" {
-					fmt.Printf("  %s\n", result.Message)
-				}
-				for _, detail := range result.Details {
-					fmt.Printf("    %s\n", detail)
-				}
-			}
+	p.finished = time.Now()
+	totalDuration := p.finished.Sub(p.started)
+
+	fmt.Println("\nTest Results Summary:")
+	fmt.Println("====================")
+
+	passed := 0
+	failed := 0
+	for _, result := range p.results {
+		status := "✓"
+		if !result.Passed {
+			status = "✗"
+			failed++
+		} else {
+			passed++
+		}
+
+		duration := result.EndTime.Sub(result.StartTime)
+		fmt.Printf("%s %s (%.2fs)\n", status, result.Name, duration.Seconds())
+		if !result.Passed && result.Message != "" {
+			fmt.Printf("   Error: %s\n", result.Message)
 		}
 	}
+
+	fmt.Println("\nSummary:")
+	fmt.Printf("Total Tests: %d\n", len(p.results))
+	fmt.Printf("Passed: %d\n", passed)
+	fmt.Printf("Failed: %d\n", failed)
+	fmt.Printf("Total Duration: %.2fs\n", totalDuration.Seconds())
 }

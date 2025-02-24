@@ -1,4 +1,12 @@
-# Default headers and User-Agent configuration
+# ProxyCheck Configuration
+
+# General settings
+timeout: 10                  # Timeout in seconds
+insecure_skip_verify: false  # Skip TLS certificate verification
+enable_cloud_checks: false   # Enable cloud provider checks
+enable_anonymity_check: true # Enable proxy anonymity checks
+
+# User agent and headers
 user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 default_headers:
   Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"
@@ -8,34 +16,69 @@ default_headers:
   Cache-Control: "no-cache"
   Pragma: "no-cache"
 
-# Test URL configuration
+# Test URLs configuration
 test_urls:
-  required_success_count: 1  # Number of successful tests required to consider a proxy working
+  default_url: "https://api.ipify.org?format=json"
+  required_success_count: 1
   urls:
-    - url: "https://www.google.com"
-      description: "Google connectivity test"
-      required: true  # This URL must work for the proxy to be considered valid
-    - url: "https://www.cloudflare.com"
-      description: "Cloudflare connectivity test"
+    - url: "https://api.ipify.org?format=json"
+      description: "IP Check"
+      required: true
+    - url: "https://httpbin.org/ip"
+      description: "HTTP Bin IP"
       required: false
-    - url: "https://www.apple.com"
-      description: "Apple connectivity test"
-      required: false
-    - url: "https://127.0.0.1"
-      description: "Localhost connectivity test"
-      required: false
-# Response validation settings
+
+# Validation settings
 validation:
-  require_status_code: 200
-  require_content_match: ""
-  require_header_fields: []
+  min_response_bytes: 100
   disallowed_keywords:
     - "Access Denied"
     - "Proxy Error"
     - "Bad Gateway"
     - "Gateway Timeout"
     - "Service Unavailable"
-  min_response_bytes: 100
+
+# Cloud provider configurations
+cloud_providers:
+  - name: "AWS"
+    metadata_ips:
+      - "169.254.169.254"
+    metadata_urls:
+      - "http://169.254.169.254/latest/meta-data/"
+    internal_ranges:
+      - "10.0.0.0/8"
+      - "172.16.0.0/12"
+      - "192.168.0.0/16"
+    org_names:
+      - "Amazon Technologies Inc."
+      - "Amazon.com, Inc."
+      - "Amazon Web Services"
+
+  - name: "GCP"
+    metadata_ips:
+      - "169.254.169.254"
+    metadata_urls:
+      - "http://metadata.google.internal/computeMetadata/v1/"
+    internal_ranges:
+      - "10.0.0.0/8"
+      - "172.16.0.0/12"
+      - "192.168.0.0/16"
+    org_names:
+      - "Google LLC"
+      - "Google Cloud"
+
+  - name: "Azure"
+    metadata_ips:
+      - "169.254.169.254"
+    metadata_urls:
+      - "http://169.254.169.254/metadata/instance"
+    internal_ranges:
+      - "10.0.0.0/8"
+      - "172.16.0.0/12"
+      - "192.168.0.0/16"
+    org_names:
+      - "Microsoft Corporation"
+      - "Microsoft Azure"
 
 # Advanced security checks
 advanced_checks:
@@ -47,77 +90,7 @@ advanced_checks:
   test_cache_poisoning: false
   test_host_header_injection: false
 
-# Cloud provider configuration
-enable_cloud_checks: false
-cloud_providers:
-  - name: AWS
-    metadata_ips:
-      - "169.254.169.254"
-    metadata_urls:
-      - "http://169.254.169.254/latest/meta-data/"
-      - "http://169.254.169.254/latest/dynamic/instance-identity/"
-      - "http://169.254.169.254/latest/user-data/"
-    internal_ranges:
-      - "172.31.0.0/16"
-      - "10.0.0.0/16"
-    asns:
-      - "16509"
-      - "14618"
-      - "38895"
-    org_names:
-      - "AMAZON"
-      - "AWS"
-      - "Amazon Technologies"
-
-  - name: Azure
-    metadata_ips:
-      - "169.254.169.254"
-      - "169.254.169.123"
-    metadata_urls:
-      - "http://169.254.169.254/metadata/instance"
-      - "http://169.254.169.254/metadata/identity"
-    internal_ranges:
-      - "10.0.0.0/16"
-      - "172.16.0.0/12"
-    asns:
-      - "8075"
-      - "8074"
-      - "8073"
-    org_names:
-      - "MICROSOFT"
-      - "AZURE"
-      - "Microsoft Corporation"
-
-  - name: GCP
-    metadata_ips:
-      - "169.254.169.254"
-    metadata_urls:
-      - "http://metadata.google.internal/computeMetadata/v1/"
-      - "http://metadata/computeMetadata/v1/"
-      - "http://metadata.google.internal/"
-    internal_ranges:
-      - "10.128.0.0/9"
-      - "172.16.0.0/12"
-    asns:
-      - "15169"
-      - "396982"
-    org_names:
-      - "GOOGLE"
-      - "GOOGLE-CLOUD"
-      - "Google LLC"
-
-  - name: DigitalOcean
-    metadata_ips:
-      - "169.254.169.254"
-    metadata_urls:
-      - "http://169.254.169.254/metadata/v1/"
-      - "http://169.254.169.254/metadata/v1.json"
-    internal_ranges:
-      - "10.116.0.0/20"
-      - "10.0.0.0/16"
-    asns:
-      - "14061"
-      - "200130"
-    org_names:
-      - "DIGITALOCEAN"
-      - "Digital Ocean" 
+# Response validation settings
+require_status_code: 200
+require_content_match: ""
+require_header_fields: [] 

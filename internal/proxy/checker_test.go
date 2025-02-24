@@ -1,4 +1,4 @@
-package main
+package proxy
 
 import (
 	"fmt"
@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"proxycheck/testhelpers"
+	"github.com/ResistanceIsUseless/ProxyCheck/tests/testhelpers"
 )
 
 // proxyHandler implements a simple HTTP proxy
@@ -282,5 +282,170 @@ func TestProxyCheckingBasic(t *testing.T) {
 				fmt.Sprintf("Error: %v", result.Error),
 			},
 		})
+	}
+}
+
+func TestNewChecker(t *testing.T) {
+	config := Config{
+		Timeout:       time.Second * 10,
+		ValidationURL: "http://example.com",
+		DefaultHeaders: map[string]string{
+			"User-Agent": "test-agent",
+		},
+	}
+	checker := NewChecker(config, false)
+	if checker == nil {
+		t.Error("NewChecker() returned nil")
+	}
+}
+
+func TestChecker_Check(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("test response"))
+	}))
+	defer server.Close()
+
+	config := Config{
+		Timeout:          time.Second * 10,
+		ValidationURL:    server.URL,
+		MinResponseBytes: 1,
+	}
+	checker := NewChecker(config, false)
+
+	tests := []struct {
+		name    string
+		proxy   string
+		wantErr bool
+	}{
+		{
+			name:    "Valid HTTP Proxy",
+			proxy:   "http://127.0.0.1:8080",
+			wantErr: false,
+		},
+		{
+			name:    "Invalid Proxy",
+			proxy:   "invalid://proxy",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := checker.Check(tt.proxy)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Check() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if !tt.wantErr && !result.Working {
+				t.Error("Check() proxy should be working")
+			}
+		})
+	}
+}
+
+func TestChecker_CheckProxyType(t *testing.T) {
+	config := Config{
+		Timeout:       time.Second * 10,
+		ValidationURL: "http://example.com",
+	}
+	checker := NewChecker(config, false)
+
+	tests := []struct {
+		name    string
+		proxy   string
+		wantErr bool
+	}{
+		{
+			name:    "HTTP Proxy",
+			proxy:   "http://127.0.0.1:8080",
+			wantErr: false,
+		},
+		{
+			name:    "SOCKS5 Proxy",
+			proxy:   "socks5://127.0.0.1:1080",
+			wantErr: false,
+		},
+		{
+			name:    "Unknown Proxy",
+			proxy:   "unknown://127.0.0.1:8080",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := checker.Check(tt.proxy)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Check() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if !tt.wantErr && result.Type == ProxyTypeUnknown {
+				t.Errorf("Check() proxy type = %v, want not %v", result.Type, ProxyTypeUnknown)
+			}
+		})
+	}
+}
+
+func TestChecker_ValidateResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("test response"))
+	}))
+	defer server.Close()
+
+	config := Config{
+		Timeout:          time.Second * 10,
+		ValidationURL:    server.URL,
+		MinResponseBytes: 1,
+	}
+	checker := NewChecker(config, false)
+
+	tests := []struct {
+		name    string
+		proxy   string
+		wantErr bool
+	}{
+		{
+			name:    "Valid Response",
+			proxy:   "http://127.0.0.1:8080",
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := checker.Check(tt.proxy)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Check() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if !tt.wantErr && !result.Working {
+				t.Error("Check() proxy should be working")
+			}
+		})
+	}
+}
+
+func TestChecker_PerformSingleCheck(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("test response"))
+	}))
+	defer server.Close()
+
+	config := Config{
+		Timeout:          time.Second * 10,
+		ValidationURL:    server.URL,
+		MinResponseBytes: 1,
+	}
+	checker := NewChecker(config, false)
+
+	result, err := checker.Check("http://127.0.0.1:8080")
+	if err != nil {
+		t.Errorf("Check() error = %v", err)
+	}
+	if !result.Working {
+		t.Error("Check() proxy should be working")
+	}
+	if result.Speed == 0 {
+		t.Error("Check() speed = 0, want > 0")
 	}
 }

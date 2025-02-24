@@ -350,7 +350,7 @@ func tryHTTPProxy(proxyURL string, timeout time.Duration, debug bool, result *Pr
 	}
 
 	// Try a simple HTTP request first
-	resp, err := client.Get("http://example.com")
+	resp, err := client.Get("http://www.google.com")
 	if err == nil {
 		resp.Body.Close()
 		result.SupportsHTTPS = false
@@ -415,7 +415,7 @@ func tryHTTPSProxy(proxyURL string, timeout time.Duration, debug bool, result *P
 		Timeout:   timeout,
 	}
 
-	resp, err := client.Get("https://example.com")
+	resp, err := client.Get("https://www.google.com")
 	if err == nil {
 		resp.Body.Close()
 		result.SupportsHTTPS = true

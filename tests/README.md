@@ -96,4 +96,4 @@ The CI workflow includes:
 1. Code linting
 2. Unit tests
 3. Benchmark tests (skipped for quick checks)
-4. Coverage reporting 
+4. Coverage reporting

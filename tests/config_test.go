@@ -3,7 +3,7 @@ package tests
 import (
 	"testing"
 
-	"proxycheck/testhelpers"
+	"github.com/ResistanceIsUseless/ProxyCheck/tests/testhelpers"
 )
 
 // TestConfigLoading tests the configuration loading functionality
@@ -14,7 +14,7 @@ func TestConfigLoading(t *testing.T) {
 	// Test loading valid config
 	progress.StartTest("Valid Config")
 	t.Run("Valid Config", func(t *testing.T) {
-		err := loadConfig("../config.yaml")
+		config, err := testhelpers.LoadConfig("../config.yaml")
 		if err != nil {
 			t.Errorf("Failed to load valid config: %v", err)
 			progress.AddResult(testhelpers.TestResult{
@@ -25,50 +25,51 @@ func TestConfigLoading(t *testing.T) {
 			return
 		}
 
-		// Verify config values
-		if len(config.DefaultHeaders) == 0 {
-			t.Error("Expected default headers to be set")
+		if len(config.ProxyTypes) == 0 {
+			t.Error("Config should have proxy types")
 			progress.AddResult(testhelpers.TestResult{
 				Name:    "Valid Config",
 				Passed:  false,
-				Message: "Default headers not set",
+				Message: "No proxy types found in config",
 			})
 			return
 		}
 
-		if config.UserAgent == "" {
-			t.Error("Expected user agent to be set")
+		if config.ValidationURL == "" {
+			t.Error("Config should have validation URL")
 			progress.AddResult(testhelpers.TestResult{
 				Name:    "Valid Config",
 				Passed:  false,
-				Message: "User agent not set",
+				Message: "No validation URL found in config",
 			})
 			return
 		}
 
 		progress.AddResult(testhelpers.TestResult{
-			Name:   "Valid Config",
-			Passed: true,
+			Name:    "Valid Config",
+			Passed:  true,
+			Message: "Successfully loaded config",
 		})
 	})
 
 	// Test loading invalid config
 	progress.StartTest("Invalid Config")
 	t.Run("Invalid Config", func(t *testing.T) {
-		err := loadConfig("nonexistent.yaml")
+		_, err := testhelpers.LoadConfig("nonexistent.yaml")
 		if err == nil {
-			t.Error("Expected error when loading invalid config")
+			t.Error("Should fail to load nonexistent config")
 			progress.AddResult(testhelpers.TestResult{
 				Name:    "Invalid Config",
 				Passed:  false,
-				Message: "Expected error when loading invalid config",
+				Message: "No error when loading nonexistent config",
 			})
 			return
 		}
 
 		progress.AddResult(testhelpers.TestResult{
-			Name:   "Invalid Config",
-			Passed: true,
+			Name:    "Invalid Config",
+			Passed:  true,
+			Message: "Correctly failed to load nonexistent config",
 		})
 	})
 }

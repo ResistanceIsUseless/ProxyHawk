@@ -1,1 +1,38 @@
-.aider*
+# Generated files
+test_proxies.txt
+results.json
+working.txt
+results.txt
+proxy_results.txt
+
+# Development files
+.aider.tags.cache.v3/
+.aider.chat.history.md
+.aider.input.history
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Binary files
+/proxycheck
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with 'go test -c'
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Dependency directories (remove if vendoring dependencies)
+vendor/
+
+# Environment files
+.env
+*.env.local

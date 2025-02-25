@@ -1,0 +1,21 @@
+timeout: 10
+test_urls:
+  default_url: "http://httpbin.org/ip"
+  urls:
+    - url: "http://httpbin.org/ip"
+      description: "HTTP IP Service"
+      required: true
+    - url: "https://api.ipify.org?format=json"
+      description: "HTTPS IP Service"
+      required: true
+    - url: "http://example.com"
+      description: "Example site"
+      required: false
+validation:
+  min_response_bytes: 10
+  disallowed_keywords:
+    - forbidden
+    - rejected
+    - blocked
+advanced_checks:
+  enabled: false 

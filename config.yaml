@@ -1,20 +1,21 @@
-# ProxyCheck Configuration
+# ProxyHawk Configuration
 
 # General settings
-timeout: 10                  # Timeout in seconds
-insecure_skip_verify: false  # Skip TLS certificate verification
+timeout: 10                   # Timeout in seconds
+insecure_skip_verify: true   # Skip TLS certificate verification
 enable_cloud_checks: false   # Enable cloud provider checks
 enable_anonymity_check: true # Enable proxy anonymity checks
+
+# Interactsh settings
+interactsh_url: "https://interact.sh"  # URL of the Interactsh server
+interactsh_token: ""                   # Token for the Interactsh server (optional)
 
 # User agent and headers
 user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 default_headers:
-  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"
-  Accept-Language: "en-US,en;q=0.9"
-  Accept-Encoding: "gzip, deflate"
+  Accept: "*/*"
   Connection: "keep-alive"
-  Cache-Control: "no-cache"
-  Pragma: "no-cache"
+  User-Agent: "curl/7.64.1"
 
 # Test URLs configuration
 test_urls:
@@ -29,14 +30,14 @@ test_urls:
       required: false
 
 # Validation settings
-validation:
-  min_response_bytes: 100
-  disallowed_keywords:
-    - "Access Denied"
-    - "Proxy Error"
-    - "Bad Gateway"
-    - "Gateway Timeout"
-    - "Service Unavailable"
+validation_url: "http://example.com"
+min_response_bytes: 100
+disallowed_keywords:
+  - "Access Denied"
+  - "Proxy Error"
+  - "Bad Gateway"
+  - "Gateway Timeout"
+  - "Service Unavailable"
 
 # Cloud provider configurations
 cloud_providers:
@@ -86,7 +87,6 @@ advanced_checks:
   test_dns_rebinding: false
   test_ipv6: false
   test_http_methods: ["GET"]
-  test_path_traversal: false
   test_cache_poisoning: false
   test_host_header_injection: false
 

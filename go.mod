@@ -1,4 +1,4 @@
-module github.com/ResistanceIsUseless/ProxyCheck
+module github.com/ResistanceIsUseless/ProxyHawk
 
 go 1.22
 

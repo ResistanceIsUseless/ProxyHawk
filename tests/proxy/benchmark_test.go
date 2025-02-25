@@ -15,7 +15,7 @@ import (
 
 const proxyScrapeAPI = "https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&proxy_format=protocolipport&format=text"
 
-type proxyCheckConfig struct {
+type proxyHawkConfig struct {
 	Timeout           time.Duration
 	MaxConcurrent     int
 	ValidationURL     string
@@ -23,7 +23,7 @@ type proxyCheckConfig struct {
 }
 
 type benchConfig struct {
-	ProxyCheck proxyCheckConfig
+	ProxyHawk proxyHawkConfig
 }
 
 type proxyResult struct {
@@ -65,7 +65,7 @@ func fetchProxiesFromAPI() ([]string, error) {
 func BenchmarkProxyScrapeChecking(b *testing.B) {
 	// Create test config
 	cfg := &benchConfig{
-		ProxyCheck: proxyCheckConfig{
+		ProxyHawk: proxyHawkConfig{
 			Timeout:           10 * time.Second,
 			MaxConcurrent:     50,
 			ValidationURL:     "https://www.google.com",
@@ -103,7 +103,7 @@ func BenchmarkProxyScrapeChecking(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		// Create channels for results and concurrency control
 		results := make(chan *proxyResult, len(cleanProxyList))
-		sem := make(chan struct{}, cfg.ProxyCheck.MaxConcurrent)
+		sem := make(chan struct{}, cfg.ProxyHawk.MaxConcurrent)
 		var wg sync.WaitGroup
 
 		// Check each proxy
@@ -154,7 +154,7 @@ func BenchmarkProxyScrapeChecking(b *testing.B) {
 
 				// Test proxy
 				start := time.Now()
-				resp, err := client.Get(cfg.ProxyCheck.ValidationURL)
+				resp, err := client.Get(cfg.ProxyHawk.ValidationURL)
 				if err != nil {
 					results <- &proxyResult{
 						ProxyURL: proxyStr,

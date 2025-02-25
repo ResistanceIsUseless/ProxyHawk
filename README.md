@@ -1,6 +1,6 @@
-# ProxyCheck
+# ProxyHawk
 
-A concurrent proxy checker written in Go that can verify multiple proxies simultaneously. It supports standard HTTP(S) checking, Out-of-Band (OOB) validation using Interactsh, proxy anonymity checking using IPInfo, and cloud provider detection with internal network testing.
+A comprehensive proxy checker and validator with advanced features for testing HTTP, HTTPS, SOCKS4, and SOCKS5 proxies.
 
 **This tool is still a work in progress and not all features are available.**
 The following issues need to be addressed:
@@ -11,8 +11,16 @@ The following issues need to be addressed:
 
 ## Installation
 
+### From Source
+```bash
+git clone https://github.com/ResistanceIsUseless/ProxyHawk.git
+cd ProxyHawk
+go build -o proxyhawk cmd/proxyhawk/main.go
 ```
-go install github.com/ResistanceIsUseless/proxycheck@latest
+
+### Using Go Install
+```bash
+go install github.com/ResistanceIsUseless/proxyhawk@latest
 ```
 
 ## Features
@@ -91,6 +99,11 @@ go run main.go -l proxies.txt
 - -j: Output results to JSON file (structured format for programmatic use)
 - -wp: Output only working proxies to a text file (format: proxy - speed)
 - -wpa: Output only working anonymous proxies to a text file (format: proxy - speed)
+
+# Rate Limiting Options
+- -rate-limit: Enable rate limiting to prevent overwhelming target servers
+- -rate-delay: Delay between requests (e.g. 500ms, 1s, 2s) (default: 1s)
+- -rate-per-host: Apply rate limiting per host instead of globally (default: true)
 ```
 ### Example Commands
 
@@ -152,6 +165,11 @@ go run main.go -l proxies.txt -wp working_proxies.txt
 Check proxies and save working anonymous ones to a separate file:
 ```bash
 go run main.go -l proxies.txt -p -wpa working_anonymous_proxies.txt
+```
+
+Check proxies with rate limiting to avoid IP bans:
+```bash
+go run main.go -l proxies.txt -rate-limit -rate-delay 2s
 ```
 
 ### Output Formats
@@ -220,7 +238,7 @@ The JSON output includes a structured format with:
 ## Building
 
 ```bash
-go build -o proxycheck
+go build -o proxyhawk
 ```
 
 ## Requirements

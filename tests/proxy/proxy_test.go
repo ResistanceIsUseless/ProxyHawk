@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	testconfig "github.com/ResistanceIsUseless/ProxyCheck/tests/config"
-	"github.com/ResistanceIsUseless/ProxyCheck/tests/testhelpers"
+	testconfig "github.com/ResistanceIsUseless/ProxyHawk/tests/config"
+	"github.com/ResistanceIsUseless/ProxyHawk/tests/testhelpers"
 )
 
 // proxyHandler implements a simple HTTP proxy
@@ -171,7 +171,7 @@ https://proxy6.example.com
 	})
 }
 
-func TestProxyCheckingBasic(t *testing.T) {
+func TestProxyHawkingBasic(t *testing.T) {
 	progress := testhelpers.NewTestProgress()
 	defer progress.PrintSummary()
 

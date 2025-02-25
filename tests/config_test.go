@@ -3,7 +3,7 @@ package tests
 import (
 	"testing"
 
-	"github.com/ResistanceIsUseless/ProxyCheck/tests/testhelpers"
+	"github.com/ResistanceIsUseless/ProxyHawk/tests/testhelpers"
 )
 
 // TestConfigLoading tests the configuration loading functionality

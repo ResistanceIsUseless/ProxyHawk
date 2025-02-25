@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ResistanceIsUseless/ProxyCheck/cloudcheck"
-	"github.com/ResistanceIsUseless/ProxyCheck/internal/proxy"
-	"github.com/ResistanceIsUseless/ProxyCheck/internal/ui"
+	"github.com/ResistanceIsUseless/ProxyHawk/cloudcheck"
+	"github.com/ResistanceIsUseless/ProxyHawk/internal/proxy"
+	"github.com/ResistanceIsUseless/ProxyHawk/internal/ui"
 	"github.com/charmbracelet/bubbles/progress"
 	tea "github.com/charmbracelet/bubbletea"
 	"gopkg.in/yaml.v3"
@@ -29,6 +29,11 @@ type Config struct {
 	EnableAnonymityCheck bool              `yaml:"enable_anonymity_check"`
 	Concurrency          int               `yaml:"concurrency"`
 
+	// Rate limiting settings
+	RateLimitEnabled bool          `yaml:"rate_limit_enabled"`
+	RateLimitDelay   time.Duration `yaml:"rate_limit_delay"`
+	RateLimitPerHost bool          `yaml:"rate_limit_per_host"`
+
 	// Test URLs configuration
 	TestURLs TestURLConfig `yaml:"test_urls"`
 
@@ -39,20 +44,16 @@ type Config struct {
 	CloudProviders []cloudcheck.CloudProvider `yaml:"cloud_providers"`
 
 	// Advanced security checks
-	AdvancedChecks struct {
-		TestProtocolSmuggling   bool     `yaml:"test_protocol_smuggling"`
-		TestDNSRebinding        bool     `yaml:"test_dns_rebinding"`
-		TestIPv6                bool     `yaml:"test_ipv6"`
-		TestHTTPMethods         []string `yaml:"test_http_methods"`
-		TestPathTraversal       bool     `yaml:"test_path_traversal"`
-		TestCachePoisoning      bool     `yaml:"test_cache_poisoning"`
-		TestHostHeaderInjection bool     `yaml:"test_host_header_injection"`
-	} `yaml:"advanced_checks"`
+	AdvancedChecks proxy.AdvancedChecks `yaml:"advanced_checks"`
 
 	// Response validation settings
 	RequireStatusCode   int      `yaml:"require_status_code"`
 	RequireContentMatch string   `yaml:"require_content_match"`
 	RequireHeaderFields []string `yaml:"require_header_fields"`
+
+	// Interactsh settings
+	InteractshURL   string `yaml:"interactsh_url"`
+	InteractshToken string `yaml:"interactsh_token"`
 }
 
 type TestURLConfig struct {
@@ -81,7 +82,13 @@ type AppState struct {
 	concurrency int
 	verbose     bool
 	debug       bool
+	mutex       sync.Mutex   // Mutex to protect shared state
+	updateChan  chan tea.Msg // Channel for sending updates to the UI
 }
+
+// Define custom message types
+type tickMsg struct{}
+type progressUpdateMsg struct{}
 
 func main() {
 	// Parse command line flags
@@ -90,6 +97,14 @@ func main() {
 	verbose := flag.Bool("v", false, "Enable verbose output")
 	debug := flag.Bool("d", false, "Enable debug mode")
 	concurrency := flag.Int("c", 0, "Number of concurrent checks (overrides config)")
+	useRDNS := flag.Bool("r", false, "Use rDNS lookup for host headers")
+	timeout := flag.Int("t", 0, "Timeout in seconds (overrides config)")
+
+	// Rate limiting flags
+	rateLimitEnabled := flag.Bool("rate-limit", false, "Enable rate limiting")
+	rateLimitDelay := flag.Duration("rate-delay", 1*time.Second, "Delay between requests (e.g. 500ms, 1s, 2s)")
+	rateLimitPerHost := flag.Bool("rate-per-host", true, "Apply rate limiting per host instead of globally")
+
 	flag.Parse()
 
 	// Load configuration
@@ -102,6 +117,9 @@ func main() {
 	// Override config with command line flags if specified
 	if *concurrency > 0 {
 		config.Concurrency = *concurrency
+	}
+	if *timeout > 0 {
+		config.Timeout = *timeout
 	}
 
 	// Load proxies
@@ -130,7 +148,15 @@ func main() {
 		RequireContentMatch: config.RequireContentMatch,
 		RequireHeaderFields: config.RequireHeaderFields,
 		AdvancedChecks:      config.AdvancedChecks,
-	}, config.AdvancedChecks.TestProtocolSmuggling || config.AdvancedChecks.TestDNSRebinding)
+		UseRDNS:             *useRDNS,
+		InteractshURL:       config.InteractshURL,
+		InteractshToken:     config.InteractshToken,
+
+		// Rate limiting settings
+		RateLimitEnabled: *rateLimitEnabled,
+		RateLimitDelay:   *rateLimitDelay,
+		RateLimitPerHost: *rateLimitPerHost,
+	}, *debug || config.AdvancedChecks.TestProtocolSmuggling || config.AdvancedChecks.TestDNSRebinding)
 
 	// Initialize UI
 	p := progress.New(
@@ -142,7 +168,7 @@ func main() {
 	view := &ui.View{
 		Progress:     p,
 		Total:        len(proxies),
-		IsVerbose:    *verbose || config.Validation.MinResponseBytes > 0,                                              // Use verbose mode if flag or detailed validation is enabled
+		IsVerbose:    *verbose,                                                                                        // Only use verbose flag
 		IsDebug:      *debug || config.AdvancedChecks.TestProtocolSmuggling || config.AdvancedChecks.TestDNSRebinding, // Use debug mode if flag or advanced checks are enabled
 		ActiveChecks: make(map[string]*ui.CheckStatus),
 	}
@@ -153,13 +179,22 @@ func main() {
 		checker:     checker,
 		proxies:     proxies,
 		concurrency: config.Concurrency,
-		verbose:     *verbose || config.Validation.MinResponseBytes > 0,
+		verbose:     *verbose, // Only use verbose flag
 		debug:       *debug || config.AdvancedChecks.TestProtocolSmuggling || config.AdvancedChecks.TestDNSRebinding,
+		updateChan:  make(chan tea.Msg, 100), // Buffer for update messages
 	}
 
 	// Start the UI
 	program := tea.NewProgram(state)
-	if err := program.Start(); err != nil {
+
+	// Start a goroutine to forward messages from updateChan to the program
+	go func() {
+		for msg := range state.updateChan {
+			program.Send(msg)
+		}
+	}()
+
+	if _, err := program.Run(); err != nil {
 		fmt.Printf("Error running program: %v\n", err)
 		os.Exit(1)
 	}
@@ -193,6 +228,12 @@ func getDefaultConfig() *Config {
 		InsecureSkipVerify:   false,
 		EnableCloudChecks:    false,
 		EnableAnonymityCheck: false,
+
+		// Default rate limiting settings
+		RateLimitEnabled: false,
+		RateLimitDelay:   1 * time.Second,
+		RateLimitPerHost: true,
+
 		DefaultHeaders: map[string]string{
 			"Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
 			"Accept-Language": "en-US,en;q=0.9",
@@ -277,16 +318,71 @@ func processResults(state *AppState) {
 func (s *AppState) Init() tea.Cmd {
 	// Start proxy checking
 	go s.startChecking()
-	return nil
+	// Start a ticker to update the UI regularly
+	return tea.Tick(time.Millisecond*100, func(time.Time) tea.Msg {
+		return tickMsg{}
+	})
 }
 
 func (s *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		if msg.Type == tea.KeyCtrlC {
+		switch msg.String() {
+		case "q", "Q", "ctrl+c":
 			return s, tea.Quit
 		}
+	case tickMsg, progressUpdateMsg:
+		// Update progress bar
+		s.mutex.Lock()
+		progress := float64(s.view.Current) / float64(s.view.Total)
+		progressCmd := s.view.Progress.SetPercent(progress)
+
+		// Update other metrics
+		s.view.ActiveJobs = 0
+		for _, status := range s.view.ActiveChecks {
+			if status.IsActive && time.Since(status.LastUpdate) < 5*time.Second {
+				s.view.ActiveJobs++
+			}
+		}
+
+		// Calculate success rate
+		workingProxies := 0
+		for _, result := range s.results {
+			if result.Working {
+				workingProxies++
+			}
+		}
+		if s.view.Current > 0 {
+			s.view.SuccessRate = float64(workingProxies) / float64(s.view.Current) * 100
+		}
+
+		// Calculate average speed
+		var totalSpeed time.Duration
+		var speedCount int
+		for _, result := range s.results {
+			if result.Speed > 0 {
+				totalSpeed += result.Speed
+				speedCount++
+			}
+		}
+		if speedCount > 0 {
+			s.view.AvgSpeed = totalSpeed / time.Duration(speedCount)
+		}
+
+		s.mutex.Unlock()
+
+		// Continue the ticker for regular updates
+		return s, tea.Batch(
+			progressCmd,
+			tea.Tick(time.Millisecond*100, func(time.Time) tea.Msg {
+				return tickMsg{}
+			}),
+		)
 	}
+
+	// Update spinner every time the UI updates
+	s.view.SpinnerIdx++
+
 	return s, nil
 }
 
@@ -303,34 +399,211 @@ func (s *AppState) View() string {
 func (s *AppState) startChecking() {
 	var wg sync.WaitGroup
 	proxyChan := make(chan string)
+	queueSize := len(s.proxies)
+
+	// Set initial queue size
+	s.mutex.Lock()
+	s.view.QueueSize = queueSize
+	s.mutex.Unlock()
+
+	// Send initial update
+	s.updateChan <- progressUpdateMsg{}
+
+	if s.debug {
+		s.mutex.Lock()
+		s.view.DebugInfo += fmt.Sprintf("[DEBUG] Starting proxy checks with concurrency: %d\n", s.concurrency)
+		s.view.DebugInfo += fmt.Sprintf("[DEBUG] Total proxies to check: %d\n", queueSize)
+		s.mutex.Unlock()
+
+		// Send update
+		s.updateChan <- progressUpdateMsg{}
+	}
 
 	// Start workers
 	for i := 0; i < s.concurrency; i++ {
 		wg.Add(1)
-		go func() {
+		go func(workerID int) {
 			defer wg.Done()
+			if s.debug {
+				s.mutex.Lock()
+				s.view.DebugInfo += fmt.Sprintf("[DEBUG] Worker %d started\n", workerID)
+				s.mutex.Unlock()
+
+				// Send update
+				s.updateChan <- progressUpdateMsg{}
+			}
+
 			for proxy := range proxyChan {
-				result, err := s.checker.Check(proxy)
-				if err != nil {
+				// Update active job status when starting a check
+				s.mutex.Lock()
+				status := &ui.CheckStatus{
+					Proxy:      proxy,
+					IsActive:   true,
+					LastUpdate: time.Now(),
+				}
+				s.view.ActiveChecks[proxy] = status
+				s.mutex.Unlock()
+
+				// Send update
+				s.updateChan <- progressUpdateMsg{}
+
+				if s.debug {
+					s.mutex.Lock()
+					s.view.DebugInfo += fmt.Sprintf("[DEBUG] Worker %d checking: %s\n", workerID, proxy)
+					s.mutex.Unlock()
+
+					// Send update
+					s.updateChan <- progressUpdateMsg{}
+				}
+
+				result := s.checker.Check(proxy)
+
+				// Update queue size after each check
+				s.mutex.Lock()
+				s.view.QueueSize = queueSize - s.view.Current - s.view.ActiveJobs
+				if s.view.QueueSize < 0 {
+					s.view.QueueSize = 0
+				}
+				s.mutex.Unlock()
+
+				// Send update
+				s.updateChan <- progressUpdateMsg{}
+
+				if !result.Working {
+					if s.debug {
+						s.mutex.Lock()
+						// Create a more concise error message
+						errorMsg := "Proxy not working"
+						if result.Error != "" {
+							errorMsg = result.Error
+							// Truncate long error messages
+							if len(errorMsg) > 100 {
+								errorMsg = errorMsg[:97] + "..."
+							}
+						}
+						s.view.DebugInfo += fmt.Sprintf("[DEBUG] Worker %d failed: %s - %s\n",
+							workerID,
+							proxy,
+							errorMsg)
+						s.mutex.Unlock()
+
+						// Send update
+						s.updateChan <- progressUpdateMsg{}
+					}
+
+					// Mark job as inactive on error
+					s.mutex.Lock()
+					if status, ok := s.view.ActiveChecks[proxy]; ok {
+						status.IsActive = false
+						status.LastUpdate = time.Now()
+					}
+					s.mutex.Unlock()
+
+					// Send update
+					s.updateChan <- progressUpdateMsg{}
+
 					continue
 				}
+
+				if s.debug {
+					s.mutex.Lock()
+					s.view.DebugInfo += fmt.Sprintf("[DEBUG] Worker %d success: %s (%s)\n",
+						workerID,
+						proxy,
+						result.Type)
+					s.mutex.Unlock()
+
+					// Send update
+					s.updateChan <- progressUpdateMsg{}
+				}
+
 				s.processResult(result)
+
+				// Send update
+				s.updateChan <- progressUpdateMsg{}
 			}
-		}()
+
+			if s.debug {
+				s.mutex.Lock()
+				s.view.DebugInfo += fmt.Sprintf("[DEBUG] Worker %d finished\n", workerID)
+				s.mutex.Unlock()
+
+				// Send update
+				s.updateChan <- progressUpdateMsg{}
+			}
+		}(i)
 	}
 
 	// Feed proxies to workers
+	if s.debug {
+		s.mutex.Lock()
+		s.view.DebugInfo += fmt.Sprintf("[DEBUG] Starting to feed proxies to workers\n")
+		s.mutex.Unlock()
+
+		// Send update
+		s.updateChan <- progressUpdateMsg{}
+	}
+
 	for _, proxy := range s.proxies {
+		if s.debug {
+			s.mutex.Lock()
+			s.view.DebugInfo += fmt.Sprintf("[DEBUG] Sending proxy to channel: %s\n", proxy)
+			s.mutex.Unlock()
+		}
 		proxyChan <- proxy
+	}
+
+	if s.debug {
+		s.mutex.Lock()
+		s.view.DebugInfo += fmt.Sprintf("[DEBUG] All proxies sent to channel, closing\n")
+		s.mutex.Unlock()
+
+		// Send update
+		s.updateChan <- progressUpdateMsg{}
 	}
 	close(proxyChan)
 
+	if s.debug {
+		s.mutex.Lock()
+		s.view.DebugInfo += fmt.Sprintf("[DEBUG] Waiting for workers to finish\n")
+		s.mutex.Unlock()
+
+		// Send update
+		s.updateChan <- progressUpdateMsg{}
+	}
 	wg.Wait()
+	if s.debug {
+		s.mutex.Lock()
+		s.view.DebugInfo += fmt.Sprintf("[DEBUG] All workers finished\n")
+		s.mutex.Unlock()
+
+		// Send update
+		s.updateChan <- progressUpdateMsg{}
+	}
+
+	// Close the update channel
+	close(s.updateChan)
 }
 
 func (s *AppState) processResult(result *proxy.ProxyResult) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
 	s.results = append(s.results, result)
 	s.view.Current++
+
+	// Convert check results
+	uiCheckResults := make([]ui.CheckResult, len(result.CheckResults))
+	for i, cr := range result.CheckResults {
+		uiCheckResults[i] = ui.CheckResult{
+			URL:        cr.URL,
+			Success:    cr.Success,
+			Speed:      cr.Speed,
+			Error:      cr.Error,
+			StatusCode: cr.StatusCode,
+			BodySize:   cr.BodySize,
+		}
+	}
 
 	// Update UI state
 	status := &ui.CheckStatus{
@@ -340,10 +613,26 @@ func (s *AppState) processResult(result *proxy.ProxyResult) {
 		LastUpdate:     time.Now(),
 		Speed:          result.Speed,
 		ProxyType:      string(result.Type),
-		IsActive:       false,
+		IsActive:       false, // Mark as inactive since check is complete
 		CloudProvider:  result.CloudProvider,
 		InternalAccess: result.InternalAccess,
 		MetadataAccess: result.MetadataAccess,
+		SupportsHTTP:   result.SupportsHTTP,
+		SupportsHTTPS:  result.SupportsHTTPS,
+		CheckResults:   uiCheckResults,
+		DebugInfo:      result.DebugInfo,
 	}
+
 	s.view.ActiveChecks[result.ProxyURL] = status
+
+	// Update queue size
+	s.view.QueueSize = len(s.proxies) - s.view.Current - s.view.ActiveJobs
+	if s.view.QueueSize < 0 {
+		s.view.QueueSize = 0
+	}
+
+	// Add debug info to the main debug output if in debug mode
+	if s.debug && result.DebugInfo != "" {
+		s.view.DebugInfo += result.DebugInfo
+	}
 }

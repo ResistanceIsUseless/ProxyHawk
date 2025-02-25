@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -44,6 +45,19 @@ var (
 			BorderForeground(lipgloss.Color("208")).
 			Padding(0, 1).
 			Width(50)
+
+	debugHeaderStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("208")).
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("208")).
+				Padding(0, 1).
+				Align(lipgloss.Center).
+				Width(50)
+
+	debugTextStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("252")).
+			Bold(false)
 
 	metricLabelStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("244")).
@@ -102,6 +116,9 @@ type CheckStatus struct {
 	CloudProvider  string
 	InternalAccess bool
 	MetadataAccess bool
+	SupportsHTTP   bool
+	SupportsHTTPS  bool
+	DebugInfo      string
 }
 
 // CheckResult represents the result of a single check
@@ -119,7 +136,7 @@ func (v *View) RenderDefault() string {
 	str := strings.Builder{}
 
 	// Title
-	str.WriteString(headerStyle.Render("ProxyCheck Progress") + "\n\n")
+	str.WriteString(headerStyle.Render("ProxyHawk Progress") + "\n\n")
 
 	// Progress information
 	progressBlock := strings.Builder{}
@@ -145,7 +162,7 @@ func (v *View) RenderVerbose() string {
 	str := strings.Builder{}
 
 	// Title
-	str.WriteString(headerStyle.Render("ProxyCheck Progress (Verbose Mode)") + "\n\n")
+	str.WriteString(headerStyle.Render("ProxyHawk Progress (Verbose Mode)") + "\n\n")
 
 	// Progress and metrics
 	str.WriteString(v.renderProgressAndMetrics())
@@ -162,26 +179,235 @@ func (v *View) RenderVerbose() string {
 
 // RenderDebug renders the debug view
 func (v *View) RenderDebug() string {
+	// Build the primary view
 	str := strings.Builder{}
 
-	// Title
-	str.WriteString(headerStyle.Render("ProxyCheck Progress (Debug Mode)") + "\n\n")
+	// Title and main metrics
+	str.WriteString(headerStyle.Render("ProxyHawk Debug Mode") + "\n\n")
+
+	// Top section with key metrics
+	metricsBlock := strings.Builder{}
 
 	// Progress information
-	str.WriteString(v.renderProgressAndMetrics())
+	metricsBlock.WriteString(fmt.Sprintf("%s %s/%s (%.1f%%)\n",
+		metricLabelStyle.Render("Progress:"),
+		metricValueStyle.Render(fmt.Sprintf("%d", v.Current)),
+		metricValueStyle.Render(fmt.Sprintf("%d", v.Total)),
+		float64(v.Current)/float64(math.Max(1.0, float64(v.Total)))*100))
 
-	// Current checks with debug information
-	str.WriteString("\nCurrent Checks:\n")
-	str.WriteString(v.renderActiveChecksDebug())
+	// Performance metrics
+	metricsBlock.WriteString(fmt.Sprintf("%s %d\n",
+		metricLabelStyle.Render("Concurrency:"),
+		v.ActiveJobs))
 
-	// Debug Information
-	if v.DebugInfo != "" {
-		str.WriteString("\nDebug Information:\n")
-		str.WriteString(debugBlockStyle.Render(v.DebugInfo) + "\n")
+	// Calculate estimated total requests
+	totalChecks := 0
+	for _, status := range v.ActiveChecks {
+		totalChecks += status.TotalChecks
+	}
+	estimatedRequests := v.Total * (totalChecks / int(math.Max(1.0, float64(len(v.ActiveChecks)))))
+	if estimatedRequests == 0 && v.Total > 0 {
+		estimatedRequests = v.Total // Default if we can't calculate yet
 	}
 
-	// Controls
+	metricsBlock.WriteString(fmt.Sprintf("%s %s\n",
+		metricLabelStyle.Render("Est. Requests:"),
+		metricValueStyle.Render(fmt.Sprintf("%d", estimatedRequests))))
+
+	metricsBlock.WriteString(fmt.Sprintf("%s %v\n",
+		metricLabelStyle.Render("Avg Speed:"),
+		metricValueStyle.Render(v.AvgSpeed.Round(time.Millisecond).String())))
+
+	str.WriteString(metricBlockStyle.Render(metricsBlock.String()) + "\n\n")
+
+	// Progress bar
+	progressBlock := strings.Builder{}
+	progressBlock.WriteString(v.Progress.View())
+	str.WriteString(progressStyle.Render(progressBlock.String()) + "\n\n")
+
+	// Results summary
+	summaryBlock := strings.Builder{}
+
+	// Calculate summary statistics
+	workingProxies := 0
+	for _, status := range v.ActiveChecks {
+		successCount := 0
+		for _, check := range status.CheckResults {
+			if check.Success {
+				successCount++
+			}
+		}
+		if successCount > 0 {
+			workingProxies++
+		}
+	}
+
+	// Count proxies by type
+	proxyTypes := make(map[string]int)
+	httpSupport := 0
+	httpsSupport := 0
+
+	for _, status := range v.ActiveChecks {
+		if status.ProxyType != "" {
+			proxyTypes[status.ProxyType]++
+		}
+		if status.SupportsHTTP {
+			httpSupport++
+		}
+		if status.SupportsHTTPS {
+			httpsSupport++
+		}
+	}
+
+	summaryBlock.WriteString(fmt.Sprintf("%s %s\n",
+		metricLabelStyle.Render("Working Proxies:"),
+		successStyle.Render(fmt.Sprintf("%d/%d (%.1f%%)",
+			workingProxies,
+			v.Current,
+			float64(workingProxies)/float64(math.Max(1.0, float64(v.Current)))*100))))
+
+	// Protocol support
+	summaryBlock.WriteString(fmt.Sprintf("%s %s, %s %s\n",
+		metricLabelStyle.Render("HTTP Support:"),
+		successStyle.Render(fmt.Sprintf("%d", httpSupport)),
+		metricLabelStyle.Render("HTTPS Support:"),
+		successStyle.Render(fmt.Sprintf("%d", httpsSupport))))
+
+	// Proxy types breakdown
+	summaryBlock.WriteString(metricLabelStyle.Render("Proxy Types:") + " ")
+	if len(proxyTypes) == 0 {
+		summaryBlock.WriteString(infoStyle.Render("None detected yet"))
+	} else {
+		typeStrings := make([]string, 0, len(proxyTypes))
+		for pType, count := range proxyTypes {
+			typeStrings = append(typeStrings, fmt.Sprintf("%s: %d", pType, count))
+		}
+		summaryBlock.WriteString(successStyle.Render(strings.Join(typeStrings, ", ")))
+	}
+
+	str.WriteString(statusBlockStyle.Render(summaryBlock.String()) + "\n\n")
+
+	// Active checks section
+	str.WriteString(lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("87")).
+		Render("ACTIVE CHECKS") + "\n")
+
+	str.WriteString(v.renderActiveChecksSimple())
+
+	// Recent log events
+	if v.DebugInfo != "" {
+		str.WriteString("\n" + lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("208")).
+			Render("RECENT LOG EVENTS") + "\n")
+
+		// Show only the most recent 20 lines
+		lines := strings.Split(v.DebugInfo, "\n")
+		start := 0
+		if len(lines) > 20 {
+			start = len(lines) - 20
+		}
+
+		for _, line := range lines[start:] {
+			if line == "" {
+				continue
+			}
+
+			// Color-code based on content
+			if strings.Contains(line, "Success") || strings.Contains(line, "success") {
+				str.WriteString(successStyle.Render(line) + "\n")
+			} else if strings.Contains(line, "error") || strings.Contains(line, "failed") ||
+				strings.Contains(line, "Error") || strings.Contains(line, "Failed") {
+				str.WriteString(errorStyle.Render(line) + "\n")
+			} else if strings.Contains(line, "Working") || strings.Contains(line, "Supports") {
+				str.WriteString(warningStyle.Render(line) + "\n")
+			} else {
+				str.WriteString(debugTextStyle.Render(line) + "\n")
+			}
+		}
+	}
+
+	// Controls at the bottom
 	str.WriteString("\n" + infoStyle.Render("Press q to quit"))
+
+	return str.String()
+}
+
+// renderActiveChecksSimple renders a simplified list of active checks
+func (v *View) renderActiveChecksSimple() string {
+	str := strings.Builder{}
+	activeList := v.getActiveChecksList()
+
+	if len(activeList) == 0 {
+		str.WriteString(infoStyle.Render("No active checks at the moment\n"))
+		return str.String()
+	}
+
+	// Display in a simpler format
+	for _, ps := range activeList {
+		proxy, status := ps.proxy, ps.status
+
+		// Determine status based on results
+		statusChar := "⌛"
+		statusStyle := infoStyle
+
+		if status.DoneChecks > 0 {
+			successCount := 0
+			for _, check := range status.CheckResults {
+				if check.Success {
+					successCount++
+				}
+			}
+
+			if successCount == status.TotalChecks && status.TotalChecks > 0 {
+				statusChar = "✓"
+				statusStyle = successStyle
+			} else if successCount > 0 {
+				statusChar = "⚠"
+				statusStyle = warningStyle
+			} else {
+				statusChar = "✗"
+				statusStyle = errorStyle
+			}
+		}
+
+		// Format the proxy URL
+		displayProxy := proxy
+		if len(displayProxy) > 30 {
+			displayProxy = displayProxy[:27] + "..."
+		}
+
+		// Build the status line
+		statusLine := fmt.Sprintf("%s %s",
+			statusStyle.Render(statusChar),
+			lipgloss.NewStyle().Bold(true).Render(displayProxy))
+
+		// Add proxy type
+		if status.ProxyType != "" {
+			statusLine += fmt.Sprintf(" [%s]", status.ProxyType)
+		}
+
+		// Add protocol support indicators
+		protocols := []string{}
+		if status.SupportsHTTP {
+			protocols = append(protocols, successStyle.Render("HTTP"))
+		}
+		if status.SupportsHTTPS {
+			protocols = append(protocols, successStyle.Render("HTTPS"))
+		}
+
+		if len(protocols) > 0 {
+			statusLine += fmt.Sprintf(" %s", strings.Join(protocols, "+"))
+		}
+
+		// Add speed if available
+		if status.Speed > 0 {
+			statusLine += fmt.Sprintf(" (%s)", status.Speed.Round(time.Millisecond))
+		}
+
+		str.WriteString(statusLine + "\n")
+	}
 
 	return str.String()
 }
@@ -222,17 +448,101 @@ func (v *View) renderActiveChecks() string {
 	str := strings.Builder{}
 	activeList := v.getActiveChecksList()
 
+	// Add a header for active checks with count
+	activeCount := len(activeList)
+	completedCount := v.Current
+	totalCount := v.Total
+
+	str.WriteString(fmt.Sprintf("Active Checks: %s | Completed: %s | Total: %s\n",
+		metricValueStyle.Render(fmt.Sprintf("%d", activeCount)),
+		metricValueStyle.Render(fmt.Sprintf("%d", completedCount)),
+		metricValueStyle.Render(fmt.Sprintf("%d", totalCount))))
+
+	if activeCount == 0 && completedCount < totalCount {
+		str.WriteString(infoStyle.Render("Waiting for checks to start...\n"))
+	} else if activeCount == 0 && completedCount == totalCount {
+		str.WriteString(successStyle.Render("All checks completed!\n"))
+	} else {
+		str.WriteString("\n")
+	}
+
 	for _, ps := range activeList {
 		proxy, status := ps.proxy, ps.status
 		spinner := spinnerFrames[v.SpinnerIdx%len(spinnerFrames)]
 
-		statusLine := fmt.Sprintf("%s %s [%s] %s (%s checks)\n",
+		// Determine status color based on check results
+		proxyStatusStyle := infoStyle
+		if status.DoneChecks > 0 {
+			successCount := 0
+			for _, check := range status.CheckResults {
+				if check.Success {
+					successCount++
+				}
+			}
+
+			if successCount == status.TotalChecks && status.TotalChecks > 0 {
+				proxyStatusStyle = successStyle
+			} else if successCount > 0 {
+				proxyStatusStyle = warningStyle
+			} else {
+				proxyStatusStyle = errorStyle
+			}
+		}
+
+		// Format proxy URL to be more readable
+		displayProxy := proxy
+		if len(displayProxy) > 40 {
+			// Truncate long proxy URLs
+			displayProxy = displayProxy[:37] + "..."
+		}
+
+		// Main status line
+		str.WriteString(fmt.Sprintf("%s %s",
 			lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Render(spinner),
-			lipgloss.NewStyle().Bold(true).Render(proxy),
-			successStyle.Render(status.ProxyType),
-			v.getStatusIndicator(status),
-			v.getCheckCount(status))
-		str.WriteString(statusLine)
+			lipgloss.NewStyle().Bold(true).Render(displayProxy)))
+
+		// Add proxy type if available
+		if status.ProxyType != "" {
+			str.WriteString(fmt.Sprintf(" [%s]",
+				successStyle.Render(status.ProxyType)))
+		}
+
+		// Ensure we have valid check counts
+		doneChecks := status.DoneChecks
+		totalChecks := status.TotalChecks
+
+		// If TotalChecks is 0 but we have results, use the length of results
+		if totalChecks == 0 && len(status.CheckResults) > 0 {
+			totalChecks = len(status.CheckResults)
+		}
+
+		// If TotalChecks is still 0, default to at least 1
+		if totalChecks == 0 {
+			totalChecks = 1
+		}
+
+		// Add check progress
+		str.WriteString(fmt.Sprintf(" %s\n",
+			proxyStatusStyle.Render(fmt.Sprintf("(%d/%d checks)", doneChecks, totalChecks))))
+
+		// Add protocol support indicators if available
+		if status.SupportsHTTP || status.SupportsHTTPS {
+			str.WriteString("  Supports: ")
+
+			if status.SupportsHTTP {
+				str.WriteString(successStyle.Render("HTTP"))
+			}
+
+			if status.SupportsHTTP && status.SupportsHTTPS {
+				str.WriteString(" + ")
+			}
+
+			if status.SupportsHTTPS {
+				str.WriteString(successStyle.Render("HTTPS"))
+			}
+
+			str.WriteString("\n")
+		}
 	}
 
 	return str.String()
@@ -242,60 +552,128 @@ func (v *View) renderActiveChecksVerbose() string {
 	str := strings.Builder{}
 	activeList := v.getActiveChecksList()
 
+	// Add a header for active checks with count
+	activeCount := len(activeList)
+	completedCount := v.Current
+	totalCount := v.Total
+
+	str.WriteString(fmt.Sprintf("Active Checks: %s | Completed: %s | Total: %s\n",
+		metricValueStyle.Render(fmt.Sprintf("%d", activeCount)),
+		metricValueStyle.Render(fmt.Sprintf("%d", completedCount)),
+		metricValueStyle.Render(fmt.Sprintf("%d", totalCount))))
+
+	if activeCount == 0 && completedCount < totalCount {
+		str.WriteString(infoStyle.Render("Waiting for checks to start...\n"))
+	} else if activeCount == 0 && completedCount == totalCount {
+		str.WriteString(successStyle.Render("All checks completed!\n"))
+	} else {
+		str.WriteString("\n")
+	}
+
 	for _, ps := range activeList {
 		proxy, status := ps.proxy, ps.status
 		spinner := spinnerFrames[v.SpinnerIdx%len(spinnerFrames)]
 
-		// Main status line
-		str.WriteString(fmt.Sprintf("%s %s\n",
-			lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Render(spinner),
-			lipgloss.NewStyle().Bold(true).Render(proxy)))
-
-		// Detailed status information
-		str.WriteString(fmt.Sprintf("  Type: %s\n", successStyle.Render(status.ProxyType)))
-		str.WriteString(fmt.Sprintf("  Status: %s\n", v.getStatusIndicator(status)))
-		str.WriteString(fmt.Sprintf("  Progress: %s checks\n", v.getCheckCount(status)))
-		if status.Speed > 0 {
-			str.WriteString(fmt.Sprintf("  Speed: %v\n", status.Speed.Round(time.Millisecond)))
-		}
-
-		// Cloud provider information
-		if status.CloudProvider != "" {
-			str.WriteString(fmt.Sprintf("  Cloud Provider: %s\n", status.CloudProvider))
-			if status.InternalAccess {
-				str.WriteString(fmt.Sprintf("  Internal Access: %s\n", successStyle.Render("Yes")))
-			}
-			if status.MetadataAccess {
-				str.WriteString(fmt.Sprintf("  Metadata Access: %s\n", warningStyle.Render("Yes")))
-			}
-		}
-
-		// Check results
-		if len(status.CheckResults) > 0 {
-			str.WriteString("  Check Results:\n")
+		// Determine status color based on check results
+		proxyStatusStyle := infoStyle
+		if status.DoneChecks > 0 {
+			successCount := 0
 			for _, check := range status.CheckResults {
-				checkStatus := successStyle.Render("✓")
-				if !check.Success {
-					checkStatus = errorStyle.Render("✗")
+				if check.Success {
+					successCount++
 				}
+			}
 
-				details := []string{
-					fmt.Sprintf("Status: %d", check.StatusCode),
-					fmt.Sprintf("Speed: %v", check.Speed.Round(time.Millisecond)),
-				}
-				if check.BodySize > 0 {
-					details = append(details, fmt.Sprintf("Size: %d bytes", check.BodySize))
-				}
-				if check.Error != "" {
-					details = append(details, fmt.Sprintf("Error: %s", check.Error))
-				}
-
-				str.WriteString(fmt.Sprintf("    %s %s - %s\n",
-					checkStatus,
-					check.URL,
-					strings.Join(details, ", ")))
+			if successCount == status.TotalChecks && status.TotalChecks > 0 {
+				proxyStatusStyle = successStyle
+			} else if successCount > 0 {
+				proxyStatusStyle = warningStyle
+			} else {
+				proxyStatusStyle = errorStyle
 			}
 		}
+
+		// Format proxy URL to be more readable
+		displayProxy := proxy
+		if len(displayProxy) > 40 {
+			// Truncate long proxy URLs
+			displayProxy = displayProxy[:37] + "..."
+		}
+
+		// Main status line
+		str.WriteString(fmt.Sprintf("%s %s",
+			lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Render(spinner),
+			lipgloss.NewStyle().Bold(true).Render(displayProxy)))
+
+		// Add proxy type if available
+		if status.ProxyType != "" {
+			str.WriteString(fmt.Sprintf(" [%s]",
+				successStyle.Render(status.ProxyType)))
+		}
+
+		// Ensure we have valid check counts
+		doneChecks := status.DoneChecks
+		totalChecks := status.TotalChecks
+
+		// If TotalChecks is 0 but we have results, use the length of results
+		if totalChecks == 0 && len(status.CheckResults) > 0 {
+			totalChecks = len(status.CheckResults)
+		}
+
+		// If TotalChecks is still 0, default to at least 1
+		if totalChecks == 0 {
+			totalChecks = 1
+		}
+
+		// Add check progress
+		str.WriteString(fmt.Sprintf(" %s\n",
+			proxyStatusStyle.Render(fmt.Sprintf("(%d/%d checks)", doneChecks, totalChecks))))
+
+		// Show check results
+		if len(status.CheckResults) > 0 {
+			str.WriteString("  Results:\n")
+			for i, check := range status.CheckResults {
+				resultStyle := errorStyle
+				if check.Success {
+					resultStyle = successStyle
+				}
+
+				str.WriteString(fmt.Sprintf("    %d. %s: %s",
+					i+1,
+					check.URL,
+					resultStyle.Render(fmt.Sprintf("%d", check.StatusCode))))
+
+				if check.Speed > 0 {
+					str.WriteString(fmt.Sprintf(" (%s)",
+						metricValueStyle.Render(check.Speed.Round(time.Millisecond).String())))
+				}
+				str.WriteString("\n")
+
+				if check.Error != "" {
+					str.WriteString(fmt.Sprintf("       Error: %s\n", errorStyle.Render(check.Error)))
+				}
+			}
+		}
+
+		// Display protocol support information
+		str.WriteString("  Protocol Support:\n")
+
+		httpStatus := "No"
+		httpStyle := errorStyle
+		if status.SupportsHTTP {
+			httpStatus = "Yes"
+			httpStyle = successStyle
+		}
+
+		httpsStatus := "No"
+		httpsStyle := errorStyle
+		if status.SupportsHTTPS {
+			httpsStatus = "Yes"
+			httpsStyle = successStyle
+		}
+
+		str.WriteString(fmt.Sprintf("    HTTP: %s\n", httpStyle.Render(httpStatus)))
+		str.WriteString(fmt.Sprintf("    HTTPS: %s\n", httpsStyle.Render(httpsStatus)))
 		str.WriteString("\n")
 	}
 
@@ -306,46 +684,149 @@ func (v *View) renderActiveChecksDebug() string {
 	str := strings.Builder{}
 	activeList := v.getActiveChecksList()
 
+	// Add a header for active checks with count
+	activeCount := len(activeList)
+	completedCount := v.Current
+	totalCount := v.Total
+
+	str.WriteString(fmt.Sprintf("Active Checks: %s | Completed: %s | Total: %s\n",
+		metricValueStyle.Render(fmt.Sprintf("%d", activeCount)),
+		metricValueStyle.Render(fmt.Sprintf("%d", completedCount)),
+		metricValueStyle.Render(fmt.Sprintf("%d", totalCount))))
+
+	if activeCount == 0 && completedCount < totalCount {
+		str.WriteString(infoStyle.Render("Waiting for checks to start...\n"))
+	} else if activeCount == 0 && completedCount == totalCount {
+		str.WriteString(successStyle.Render("All checks completed!\n"))
+	} else {
+		str.WriteString("\n")
+	}
+
 	for _, ps := range activeList {
 		proxy, status := ps.proxy, ps.status
 		spinner := spinnerFrames[v.SpinnerIdx%len(spinnerFrames)]
 
+		// Determine status color based on check results
+		proxyStatusStyle := errorStyle
+		if status.DoneChecks > 0 {
+			successCount := 0
+			for _, check := range status.CheckResults {
+				if check.Success {
+					successCount++
+				}
+			}
+
+			if successCount == status.TotalChecks && status.TotalChecks > 0 {
+				proxyStatusStyle = successStyle
+			} else if successCount > 0 {
+				proxyStatusStyle = warningStyle
+			}
+		}
+
+		// Format proxy URL to be more readable
+		displayProxy := proxy
+		if len(displayProxy) > 40 {
+			// Truncate long proxy URLs
+			displayProxy = displayProxy[:37] + "..."
+		}
+
 		// Main status line with debug information
-		str.WriteString(fmt.Sprintf("%s %s [%s] (%d/%d checks)\n",
+		str.WriteString(fmt.Sprintf("%s %s",
 			lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Render(spinner),
-			lipgloss.NewStyle().Bold(true).Render(proxy),
-			successStyle.Render(status.ProxyType),
-			status.DoneChecks,
-			status.TotalChecks))
+			lipgloss.NewStyle().Bold(true).Render(displayProxy)))
+
+		// Add proxy type if available
+		if status.ProxyType != "" {
+			str.WriteString(fmt.Sprintf(" [%s]",
+				successStyle.Render(status.ProxyType)))
+		}
+
+		// Ensure we have valid check counts
+		doneChecks := status.DoneChecks
+		totalChecks := status.TotalChecks
+
+		// If TotalChecks is 0 but we have results, use the length of results
+		if totalChecks == 0 && len(status.CheckResults) > 0 {
+			totalChecks = len(status.CheckResults)
+		}
+
+		// If TotalChecks is still 0, default to at least 1
+		if totalChecks == 0 {
+			totalChecks = 1
+		}
+
+		// Add check progress
+		str.WriteString(fmt.Sprintf(" %s\n",
+			proxyStatusStyle.Render(fmt.Sprintf("(%d/%d checks)", doneChecks, totalChecks))))
 
 		// Cloud provider debug information
 		if status.CloudProvider != "" {
 			str.WriteString(fmt.Sprintf("  Cloud Provider: %s\n", status.CloudProvider))
-			str.WriteString(fmt.Sprintf("  Internal Access: %v\n", status.InternalAccess))
-			str.WriteString(fmt.Sprintf("  Metadata Access: %v\n", status.MetadataAccess))
-		}
 
-		// Detailed check results with debug information
-		for _, check := range status.CheckResults {
-			checkStatus := successStyle.Render("✓")
-			if !check.Success {
-				checkStatus = errorStyle.Render("✗")
+			// Color-code access information
+			internalAccessText := "No"
+			internalAccessStyle := errorStyle
+			if status.InternalAccess {
+				internalAccessText = "Yes"
+				internalAccessStyle = warningStyle
 			}
 
-			str.WriteString(fmt.Sprintf("  %s %s\n", checkStatus, check.URL))
-			str.WriteString(fmt.Sprintf("    Status Code: %d\n", check.StatusCode))
-			str.WriteString(fmt.Sprintf("    Response Size: %d bytes\n", check.BodySize))
-			str.WriteString(fmt.Sprintf("    Response Time: %v\n", check.Speed.Round(time.Millisecond)))
+			str.WriteString(fmt.Sprintf("  Internal Access: %s\n", internalAccessStyle.Render(internalAccessText)))
 
-			if check.Error != "" {
-				str.WriteString(fmt.Sprintf("    Error: %s\n", check.Error))
+			metadataAccessText := "No"
+			metadataAccessStyle := errorStyle
+			if status.MetadataAccess {
+				metadataAccessText = "Yes"
+				metadataAccessStyle = warningStyle
 			}
+
+			str.WriteString(fmt.Sprintf("  Metadata Access: %s\n", metadataAccessStyle.Render(metadataAccessText)))
 		}
 
-		// Add timing information
-		if !status.LastUpdate.IsZero() {
-			str.WriteString(fmt.Sprintf("    Last Update: %v ago\n",
-				time.Since(status.LastUpdate).Round(time.Millisecond)))
+		// Display protocol support information
+		str.WriteString("  Protocol Support:\n")
+
+		httpStatus := "No"
+		httpStyle := errorStyle
+		if status.SupportsHTTP {
+			httpStatus = "Yes"
+			httpStyle = successStyle
+		}
+
+		httpsStatus := "No"
+		httpsStyle := errorStyle
+		if status.SupportsHTTPS {
+			httpsStatus = "Yes"
+			httpsStyle = successStyle
+		}
+
+		str.WriteString(fmt.Sprintf("    HTTP: %s\n", httpStyle.Render(httpStatus)))
+		str.WriteString(fmt.Sprintf("    HTTPS: %s\n", httpsStyle.Render(httpsStatus)))
+
+		// Show check results
+		if len(status.CheckResults) > 0 {
+			str.WriteString("  Results:\n")
+			for i, check := range status.CheckResults {
+				resultStyle := errorStyle
+				if check.Success {
+					resultStyle = successStyle
+				}
+
+				str.WriteString(fmt.Sprintf("    %d. %s: %s",
+					i+1,
+					check.URL,
+					resultStyle.Render(fmt.Sprintf("%d", check.StatusCode))))
+
+				if check.Speed > 0 {
+					str.WriteString(fmt.Sprintf(" (%s)",
+						metricValueStyle.Render(check.Speed.Round(time.Millisecond).String())))
+				}
+				str.WriteString("\n")
+
+				if check.Error != "" {
+					str.WriteString(fmt.Sprintf("       Error: %s\n", errorStyle.Render(check.Error)))
+				}
+			}
 		}
 
 		str.WriteString("\n")

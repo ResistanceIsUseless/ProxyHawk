@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func TestProxyCheck(t *testing.T) {
+func TestProxyHawk(t *testing.T) {
 	// Create a test server that acts as a target server
 	targetServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
@@ -68,7 +68,7 @@ func TestProxyCheck(t *testing.T) {
 			"Accept":          "text/html",
 			"Accept-Language": "en-US,en;q=0.9",
 		},
-		UserAgent: "ProxyCheck Test/1.0",
+		UserAgent: "ProxyHawk Test/1.0",
 	}
 
 	tests := []struct {

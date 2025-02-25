@@ -9,13 +9,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ResistanceIsUseless/ProxyCheck/cloudcheck"
-	proxylib "github.com/ResistanceIsUseless/ProxyCheck/proxy"
-	testconfig "github.com/ResistanceIsUseless/ProxyCheck/tests/config"
-	"github.com/ResistanceIsUseless/ProxyCheck/tests/testhelpers"
+	"github.com/ResistanceIsUseless/ProxyHawk/cloudcheck"
+	proxylib "github.com/ResistanceIsUseless/ProxyHawk/proxy"
+	testconfig "github.com/ResistanceIsUseless/ProxyHawk/tests/config"
+	"github.com/ResistanceIsUseless/ProxyHawk/tests/testhelpers"
 )
 
-func TestProxyCheckFeatures(t *testing.T) {
+func TestProxyHawkFeatures(t *testing.T) {
 	progress := testhelpers.NewTestProgress()
 	defer progress.PrintSummary()
 
@@ -112,7 +112,7 @@ func TestProxyCheckFeatures(t *testing.T) {
 			"Accept":          "text/html",
 			"Accept-Language": "en-US,en;q=0.9",
 		},
-		UserAgent: "ProxyCheck Test/1.0",
+		UserAgent: "ProxyHawk Test/1.0",
 	}
 
 	// Test cases for different features

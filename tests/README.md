@@ -1,6 +1,6 @@
-# ProxyCheck Tests
+# ProxyHawk Test Cases
 
-This directory contains the test suite for the ProxyCheck application. The tests are organized by functionality and use Go's built-in testing framework.
+This directory contains the test suite for the ProxyHawk application. The tests are organized by functionality and use Go's built-in testing framework.
 
 ## Test Structure
 

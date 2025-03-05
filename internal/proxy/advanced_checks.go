@@ -221,6 +221,9 @@ func (c *Checker) checkProtocolSmuggling(client *http.Client, testDomain string)
 		Success: false,
 	}
 
+	// Apply rate limiting
+	c.applyRateLimit(testDomain, &ProxyResult{DebugInfo: ""})
+
 	// Send a request with ambiguous Content-Length headers
 	req, err := http.NewRequest("POST", result.URL, strings.NewReader("test"))
 	if err != nil {
@@ -250,6 +253,9 @@ func (c *Checker) checkDNSRebinding(client *http.Client, testDomain string) (*Ch
 		URL:     fmt.Sprintf("http://%s", testDomain),
 		Success: false,
 	}
+
+	// Apply rate limiting
+	c.applyRateLimit(testDomain, &ProxyResult{DebugInfo: ""})
 
 	req, err := http.NewRequest("GET", result.URL, nil)
 	if err != nil {
@@ -281,6 +287,9 @@ func (c *Checker) checkIPv6Support(client *http.Client, testDomain string) (*Che
 		Success: false,
 	}
 
+	// Apply rate limiting
+	c.applyRateLimit(testDomain, &ProxyResult{DebugInfo: ""})
+
 	req, err := http.NewRequest("GET", result.URL, nil)
 	if err != nil {
 		return result, err
@@ -306,6 +315,9 @@ func (c *Checker) checkHTTPMethods(client *http.Client, testDomain string) ([]*C
 	baseURL := fmt.Sprintf("http://%s", testDomain)
 
 	for _, method := range c.config.AdvancedChecks.TestHTTPMethods {
+		// Apply rate limiting between method tests
+		c.applyRateLimit(testDomain, &ProxyResult{DebugInfo: ""})
+
 		result := &CheckResult{
 			URL: baseURL,
 		}
@@ -342,6 +354,9 @@ func (c *Checker) checkCachePoisoning(client *http.Client, testDomain string) (*
 		Success: false,
 	}
 
+	// Apply rate limiting
+	c.applyRateLimit(testDomain, &ProxyResult{DebugInfo: ""})
+
 	req, err := http.NewRequest("GET", result.URL, nil)
 	if err != nil {
 		return result, err
@@ -371,6 +386,9 @@ func (c *Checker) checkHostHeaderInjection(client *http.Client, testDomain strin
 		URL:     fmt.Sprintf("http://%s", testDomain),
 		Success: false,
 	}
+
+	// Apply rate limiting
+	c.applyRateLimit(testDomain, &ProxyResult{DebugInfo: ""})
 
 	req, err := http.NewRequest("GET", result.URL, nil)
 	if err != nil {

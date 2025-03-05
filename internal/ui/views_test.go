@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -193,5 +194,5 @@ func TestView_GetCheckCount(t *testing.T) {
 
 // Helper function to check if a string contains another string
 func contains(s, substr string) bool {
-	return s != "" && s != "0/0" && s != "STATUS"
+	return strings.Contains(s, substr)
 }

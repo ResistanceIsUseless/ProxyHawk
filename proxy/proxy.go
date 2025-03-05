@@ -303,21 +303,24 @@ func detectProxyType(host string, timeout time.Duration, debug bool) ProxyDetect
 		result.DebugInfo = fmt.Sprintf("Starting proxy detection for %s\n", host)
 	}
 
-	// First try HTTP
+	// Test both HTTP and HTTPS capabilities
 	httpURL := fmt.Sprintf("http://%s", host)
-	if tryHTTPProxy(httpURL, timeout, debug, &result) {
+	httpsURL := fmt.Sprintf("https://%s", host)
+
+	supportsHTTP := tryHTTPProxy(httpURL, timeout, debug, &result)
+	supportsHTTPS := tryHTTPSProxy(httpsURL, timeout, debug, &result)
+
+	// Determine proxy type based on supported protocols
+	if supportsHTTPS {
+		result.Type = ProxyTypeHTTPS
+		return result
+	}
+	if supportsHTTP {
 		result.Type = ProxyTypeHTTP
 		return result
 	}
 
-	// Then try HTTPS
-	httpsURL := fmt.Sprintf("https://%s", host)
-	if tryHTTPSProxy(httpsURL, timeout, debug, &result) {
-		result.Type = ProxyTypeHTTPS
-		return result
-	}
-
-	// Finally try SOCKS
+	// If neither HTTP nor HTTPS works, try SOCKS
 	if trySocksProxy(host, timeout, debug, &result) {
 		return result
 	}

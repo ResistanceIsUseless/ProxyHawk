@@ -5,7 +5,10 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 // LoadProxies loads test proxy data from a file
@@ -24,16 +27,28 @@ func LoadProxies(filename string) ([]string, error) {
 	return proxies, nil
 }
 
-// LoadConfig loads test configuration from a file
+// LoadConfig loads test configuration from a file (supports both JSON and YAML)
 func LoadConfig(filename string) (map[string]interface{}, error) {
 	data, err := ioutil.ReadFile(filename)
 	if err != nil {
 		return nil, err
 	}
+
 	var config map[string]interface{}
-	if err := json.Unmarshal(data, &config); err != nil {
-		return nil, err
+
+	// Determine file format based on extension
+	ext := strings.ToLower(filepath.Ext(filename))
+	if ext == ".yaml" || ext == ".yml" {
+		if err := yaml.Unmarshal(data, &config); err != nil {
+			return nil, err
+		}
+	} else {
+		// Default to JSON for other extensions
+		if err := json.Unmarshal(data, &config); err != nil {
+			return nil, err
+		}
 	}
+
 	return config, nil
 }
 

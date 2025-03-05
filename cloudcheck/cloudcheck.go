@@ -7,16 +7,19 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // CloudProvider represents a cloud provider configuration
 type CloudProvider struct {
-	Name           string   `yaml:"name"`
-	MetadataIPs    []string `yaml:"metadata_ips"`
-	MetadataURLs   []string `yaml:"metadata_urls"`
-	InternalRanges []string `yaml:"internal_ranges"`
-	ASNs           []string `yaml:"asns"`
-	OrgNames       []string `yaml:"org_names"`
+	Name            string            `yaml:"name"`
+	MetadataIPs     []string          `yaml:"metadata_ips"`
+	MetadataURLs    []string          `yaml:"metadata_urls"`
+	MetadataHeaders map[string]string `yaml:"metadata_headers"`
+	InternalRanges  []string          `yaml:"internal_ranges"`
+	ASNs            []string          `yaml:"asns"`
+	OrgNames        []string          `yaml:"org_names"`
+	Timeout         int               `yaml:"timeout"` // Timeout in seconds for network requests
 }
 
 // Result represents the result of cloud provider checks
@@ -109,6 +112,11 @@ func CheckInternalAccess(client *http.Client, provider *CloudProvider, debug boo
 		return &Result{DebugInfo: "No cloud provider detected"}, nil
 	}
 
+	// Set timeout if specified in provider config
+	if provider.Timeout > 0 {
+		client.Timeout = time.Duration(provider.Timeout) * time.Second
+	}
+
 	// Test multiple random internal IPs
 	internalAccess := false
 	randomIPs := GetRandomInternalIPs(provider, 5)
@@ -132,6 +140,8 @@ func CheckInternalAccess(client *http.Client, provider *CloudProvider, debug boo
 
 	// Test metadata endpoints
 	metadataAccess := false
+
+	// First try metadata IPs
 	for _, metadataIP := range provider.MetadataIPs {
 		for _, scheme := range []string{"http", "https"} {
 			metadataURL := fmt.Sprintf("%s://%s/", scheme, metadataIP)
@@ -140,10 +150,10 @@ func CheckInternalAccess(client *http.Client, provider *CloudProvider, debug boo
 			}
 
 			req, _ := http.NewRequest("GET", metadataURL, nil)
-			// Add common metadata headers
-			req.Header.Set("Metadata", "true")
-			req.Header.Set("Metadata-Flavor", "Google")
-			req.Header.Set("X-aws-ec2-metadata-token-ttl-seconds", "21600")
+			// Add provider-specific metadata headers
+			for key, value := range provider.MetadataHeaders {
+				req.Header.Set(key, value)
+			}
 
 			resp, err := client.Do(req)
 			if err == nil {
@@ -160,6 +170,34 @@ func CheckInternalAccess(client *http.Client, provider *CloudProvider, debug boo
 		}
 		if metadataAccess {
 			break
+		}
+	}
+
+	// If metadata IP access failed, try metadata URLs
+	if !metadataAccess {
+		for _, metadataURL := range provider.MetadataURLs {
+			if debug {
+				debugInfo += fmt.Sprintf("\nTrying metadata URL: %s\n", metadataURL)
+			}
+
+			req, _ := http.NewRequest("GET", metadataURL, nil)
+			// Add provider-specific metadata headers
+			for key, value := range provider.MetadataHeaders {
+				req.Header.Set(key, value)
+			}
+
+			resp, err := client.Do(req)
+			if err == nil {
+				defer resp.Body.Close()
+				if resp.StatusCode == 200 {
+					if debug {
+						body, _ := io.ReadAll(resp.Body)
+						debugInfo += fmt.Sprintf("Metadata access successful via URL! Response:\n%s\n", string(body))
+					}
+					metadataAccess = true
+					break
+				}
+			}
 		}
 	}
 

@@ -670,6 +670,9 @@ func (c *Checker) testClientWithDetails(client *http.Client, proxyType ProxyType
 		URL: testURL,
 	}
 
+	// For HTTPS URLs through HTTP proxies, we need to handle the CONNECT method
+	isHTTPSOverHTTP := strings.HasPrefix(testURL, "https://") && proxyType == ProxyTypeHTTP
+
 	req, err := http.NewRequest("GET", testURL, nil)
 	if err != nil {
 		errMsg := fmt.Sprintf("error creating request: %v", err)
@@ -695,6 +698,35 @@ func (c *Checker) testClientWithDetails(client *http.Client, proxyType ProxyType
 	checkResult.Speed = time.Since(start)
 
 	if err != nil {
+		// For HTTPS over HTTP proxy, we need to check if this is a CONNECT error
+		if isHTTPSOverHTTP {
+			if strings.Contains(err.Error(), "Proxy Authentication Required") ||
+				strings.Contains(err.Error(), "407") {
+				errMsg := fmt.Sprintf("%s proxy requires authentication", proxyType)
+				checkResult.Error = errMsg
+				if c.debug {
+					result.DebugInfo += fmt.Sprintf("[CHECK] %s\n", errMsg)
+				}
+				return false, errMsg, checkResult
+			}
+
+			// Some proxies might return different errors for CONNECT
+			if strings.Contains(err.Error(), "CONNECT") {
+				// This might be a CONNECT handshake error, which is expected
+				// Let's try to determine if it's a valid proxy despite the error
+				if strings.Contains(err.Error(), "connection established") ||
+					strings.Contains(err.Error(), "200") {
+					// This is actually a successful CONNECT, but the subsequent request failed
+					if c.debug {
+						result.DebugInfo += fmt.Sprintf("[CHECK] CONNECT succeeded but subsequent request failed: %v\n", err)
+					}
+					// We'll mark this as a potential HTTP proxy that supports CONNECT
+					result.SupportsHTTPS = true
+					return true, "", checkResult
+				}
+			}
+		}
+
 		errMsg := fmt.Sprintf("%s connection error: %v", proxyType, err)
 		checkResult.Error = errMsg
 		if c.debug {
@@ -724,7 +756,16 @@ func (c *Checker) testClientWithDetails(client *http.Client, proxyType ProxyType
 		result.DebugInfo += fmt.Sprintf("[CHECK] Response time: %v\n", checkResult.Speed)
 	}
 
-	if resp.StatusCode >= 400 {
+	// For HTTPS over HTTP proxy, we need to be more lenient with status codes
+	// as some proxies might return different success codes for CONNECT
+	if isHTTPSOverHTTP {
+		if resp.StatusCode == http.StatusOK || // 200 OK
+			resp.StatusCode == http.StatusCreated || // 201 Created
+			resp.StatusCode == http.StatusAccepted || // 202 Accepted
+			resp.StatusCode == http.StatusNoContent { // 204 No Content
+			result.SupportsHTTPS = true
+		}
+	} else if resp.StatusCode >= 400 {
 		errMsg := fmt.Sprintf("server returned error status: %d %s", resp.StatusCode, resp.Status)
 		checkResult.Error = errMsg
 		checkResult.Success = false
@@ -998,50 +1039,54 @@ func (c *Checker) checkAnonymity(client *http.Client) (bool, string, string, err
 	return false, "", "", nil // Placeholder
 }
 
+// applyRateLimit applies rate limiting based on configuration
+func (c *Checker) applyRateLimit(host string, result *ProxyResult) {
+	if !c.config.RateLimitEnabled {
+		return
+	}
+
+	c.rateLimiterLock.Lock()
+	defer c.rateLimiterLock.Unlock()
+
+	// Determine the key for rate limiting
+	rateLimitKey := "global"
+	if c.config.RateLimitPerHost {
+		rateLimitKey = host
+	}
+
+	// Check if we need to wait
+	if lastTime, exists := c.rateLimiter[rateLimitKey]; exists {
+		elapsed := time.Since(lastTime)
+		if elapsed < c.config.RateLimitDelay {
+			waitTime := c.config.RateLimitDelay - elapsed
+			if c.debug {
+				result.DebugInfo += fmt.Sprintf("[DEBUG] Rate limiting: waiting %v before request to %s\n", waitTime, host)
+			}
+			time.Sleep(waitTime)
+		}
+	}
+
+	// Update the last request time
+	c.rateLimiter[rateLimitKey] = time.Now()
+
+	if c.debug {
+		result.DebugInfo += fmt.Sprintf("[DEBUG] Rate limiting applied for %s\n", rateLimitKey)
+	}
+}
+
 func (c *Checker) makeRequest(client *http.Client, urlStr string, result *ProxyResult) (*http.Response, error) {
-	req, err := http.NewRequest("GET", urlStr, nil)
+	// Create a context with the configured timeout
+	ctx, cancel := context.WithTimeout(context.Background(), c.config.Timeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", urlStr, nil)
 	if err != nil {
 		return nil, err
 	}
 
 	// Apply rate limiting if enabled
-	if c.config.RateLimitEnabled {
-		parsedURL, err := url.Parse(urlStr)
-		if err == nil {
-			host := parsedURL.Hostname()
-
-			c.rateLimiterLock.Lock()
-
-			// Determine the key for rate limiting
-			rateLimitKey := "global"
-			if c.config.RateLimitPerHost {
-				rateLimitKey = host
-			}
-
-			// Check if we need to wait
-			if lastTime, exists := c.rateLimiter[rateLimitKey]; exists {
-				elapsed := time.Since(lastTime)
-				if elapsed < c.config.RateLimitDelay {
-					waitTime := c.config.RateLimitDelay - elapsed
-					if c.debug {
-						result.DebugInfo += fmt.Sprintf("[DEBUG] Rate limiting: waiting %v before request to %s\n", waitTime, host)
-					}
-
-					// Release the lock during sleep
-					c.rateLimiterLock.Unlock()
-					time.Sleep(waitTime)
-					c.rateLimiterLock.Lock()
-				}
-			}
-
-			// Update the last request time
-			c.rateLimiter[rateLimitKey] = time.Now()
-			c.rateLimiterLock.Unlock()
-
-			if c.debug {
-				result.DebugInfo += fmt.Sprintf("[DEBUG] Rate limiting applied for %s\n", rateLimitKey)
-			}
-		}
+	if parsedURL, err := url.Parse(urlStr); err == nil {
+		c.applyRateLimit(parsedURL.Hostname(), result)
 	}
 
 	// Set headers

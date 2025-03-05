@@ -46,6 +46,9 @@ cloud_providers:
       - "169.254.169.254"
     metadata_urls:
       - "http://169.254.169.254/latest/meta-data/"
+      - "http://169.254.169.254/latest/dynamic/instance-identity/"
+    metadata_headers:
+      "X-aws-ec2-metadata-token-ttl-seconds": "21600"
     internal_ranges:
       - "10.0.0.0/8"
       - "172.16.0.0/12"
@@ -60,6 +63,9 @@ cloud_providers:
       - "169.254.169.254"
     metadata_urls:
       - "http://metadata.google.internal/computeMetadata/v1/"
+      - "http://metadata/computeMetadata/v1/"
+    metadata_headers:
+      "Metadata-Flavor": "Google"
     internal_ranges:
       - "10.0.0.0/8"
       - "172.16.0.0/12"
@@ -73,6 +79,10 @@ cloud_providers:
       - "169.254.169.254"
     metadata_urls:
       - "http://169.254.169.254/metadata/instance"
+      - "http://169.254.169.254/metadata/identity"
+    metadata_headers:
+      "Metadata": "true"
+      "User-Agent": "curl/7.64.0"
     internal_ranges:
       - "10.0.0.0/8"
       - "172.16.0.0/12"
@@ -80,6 +90,21 @@ cloud_providers:
     org_names:
       - "Microsoft Corporation"
       - "Microsoft Azure"
+
+  - name: "DigitalOcean"
+    metadata_ips:
+      - "169.254.169.254"
+    metadata_urls:
+      - "http://169.254.169.254/metadata/v1/"
+    metadata_headers:
+      "Metadata-Token": "do-metadata"
+    internal_ranges:
+      - "10.0.0.0/8"
+      - "172.16.0.0/12"
+      - "192.168.0.0/16"
+    org_names:
+      - "DigitalOcean, LLC"
+      - "DigitalOcean"
 
 # Advanced security checks
 advanced_checks:

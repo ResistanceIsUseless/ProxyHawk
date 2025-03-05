@@ -129,11 +129,22 @@ func (t *InteractshTester) CheckInteractions(correlationID string, timeout time.
 }
 
 // PerformInteractshTest performs a test using Interactsh
-func (t *InteractshTester) PerformInteractshTest(client *http.Client, testFunc func(url string) (*http.Request, error)) (*CheckResult, error) {
+func (t *InteractshTester) PerformInteractshTest(client *http.Client, checker *Checker, testFunc func(url string) (*http.Request, error)) (*CheckResult, error) {
 	url := t.GenerateURL()
+	// Extract the correlation ID (subdomain) from the URL
+	correlationID := url
+	if idx := len(url) - len(".interact.sh"); idx > 0 && idx < len(url) {
+		correlationID = url[:idx]
+	}
+
 	result := &CheckResult{
 		URL:     fmt.Sprintf("http://%s", url),
 		Success: false,
+	}
+
+	// Apply rate limiting
+	if checker != nil {
+		checker.applyRateLimit(url, &ProxyResult{DebugInfo: ""})
 	}
 
 	req, err := testFunc(url)
@@ -153,8 +164,8 @@ func (t *InteractshTester) PerformInteractshTest(client *http.Client, testFunc f
 	result.Speed = time.Since(start)
 	result.StatusCode = resp.StatusCode
 
-	// Check for interactions
-	interactions := t.CheckInteractions(url, 2*time.Second)
+	// Check for interactions using the correlation ID
+	interactions := t.CheckInteractions(correlationID, 2*time.Second)
 	result.Success = len(interactions) > 0
 
 	return result, nil

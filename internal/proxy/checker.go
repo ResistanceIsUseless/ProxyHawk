@@ -329,6 +329,35 @@ func (c *Checker) determineProxyType(proxyURL *url.URL, result *ProxyResult) (Pr
 		return best.proxyType, best.client, nil
 	}
 
+	// If HTTP/HTTPS failed, try HTTP/2 and HTTP/3 if enabled
+	if c.config.EnableHTTP2 || c.config.EnableHTTP3 {
+		if c.debug {
+			result.DebugInfo += fmt.Sprintf("[TYPE] Testing advanced HTTP protocols (HTTP/2, HTTP/3): %s\n", proxyURL.Host)
+		}
+
+		// Test HTTP/2 support if enabled
+		if c.config.EnableHTTP2 {
+			if success, client := c.detectHTTP2Protocol(proxyURL, result); success {
+				result.SupportsHTTP2 = true
+				if c.debug {
+					result.DebugInfo += fmt.Sprintf("[TYPE] Selected HTTP/2 proxy\n")
+				}
+				return ProxyTypeHTTP2, client, nil
+			}
+		}
+
+		// Test HTTP/3 support if enabled
+		if c.config.EnableHTTP3 {
+			if success, client := c.detectHTTP3Protocol(proxyURL, result); success {
+				result.SupportsHTTP3 = true
+				if c.debug {
+					result.DebugInfo += fmt.Sprintf("[TYPE] Selected HTTP/3 proxy\n")
+				}
+				return ProxyTypeHTTP3, client, nil
+			}
+		}
+	}
+
 	// If HTTP/HTTPS failed, try SOCKS proxies
 	if c.debug {
 		result.DebugInfo += fmt.Sprintf("[TYPE] Testing as SOCKS proxy: %s\n", proxyURL.Host)

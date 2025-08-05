@@ -99,6 +99,10 @@ func main() {
 	metricsAddr := flag.String("metrics-addr", ":9090", "Address to serve metrics on")
 	metricsPath := flag.String("metrics-path", "/metrics", "Path for metrics endpoint")
 
+	// Protocol flags
+	enableHTTP2 := flag.Bool("http2", false, "Enable HTTP/2 protocol detection and support")
+	enableHTTP3 := flag.Bool("http3", false, "Enable HTTP/3 protocol detection and support")
+
 	// Help and version flags
 	showHelp := flag.Bool("help", false, "Show help message")
 	showHelpShort := flag.Bool("h", false, "Show help message (short)")
@@ -227,6 +231,14 @@ func main() {
 		cfg.Metrics.Path = *metricsPath
 	}
 
+	// Override protocol settings with CLI flags
+	if *enableHTTP2 {
+		cfg.EnableHTTP2 = true
+	}
+	if *enableHTTP3 {
+		cfg.EnableHTTP3 = true
+	}
+
 	// Load proxies
 	proxies, warnings, err := loader.LoadProxies(*proxyList)
 	if err != nil {
@@ -323,6 +335,10 @@ func main() {
 
 		// Connection pool
 		ConnectionPool: connectionPool,
+
+		// HTTP/2 and HTTP/3 settings
+		EnableHTTP2: cfg.EnableHTTP2,
+		EnableHTTP3: cfg.EnableHTTP3,
 	}, *debug || cfg.AdvancedChecks.TestProtocolSmuggling || cfg.AdvancedChecks.TestDNSRebinding)
 
 	// Initialize UI

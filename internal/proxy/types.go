@@ -14,6 +14,8 @@ const (
 	ProxyTypeUnknown ProxyType = "unknown"
 	ProxyTypeHTTP    ProxyType = "http"
 	ProxyTypeHTTPS   ProxyType = "https"
+	ProxyTypeHTTP2   ProxyType = "http2"
+	ProxyTypeHTTP3   ProxyType = "http3"
 	ProxyTypeSOCKS4  ProxyType = "socks4"
 	ProxyTypeSOCKS5  ProxyType = "socks5"
 )
@@ -66,6 +68,10 @@ type Config struct {
 
 	// Connection pool settings
 	ConnectionPool interface{} // Will be set to *pool.ConnectionPool, but using interface{} to avoid circular import
+
+	// HTTP/2 and HTTP/3 settings
+	EnableHTTP2 bool // Whether to enable HTTP/2 protocol detection and support
+	EnableHTTP3 bool // Whether to enable HTTP/3 protocol detection and support
 }
 
 // CheckResult represents the result of a single check
@@ -102,6 +108,8 @@ type ProxyResult struct {
 	// New fields for protocol support
 	SupportsHTTP  bool
 	SupportsHTTPS bool
+	SupportsHTTP2 bool
+	SupportsHTTP3 bool
 }
 
 // Checker represents the main proxy checker

@@ -25,6 +25,19 @@ type ProxyResultOutput struct {
 	Timestamp      time.Time     `json:"timestamp"`
 	Error          string        `json:"error,omitempty"`
 	Type           string        `json:"type,omitempty"`
+	
+	// Protocol support information
+	ProtocolSupport ProtocolSupport `json:"protocol_support"`
+}
+
+// ProtocolSupport represents which protocols a proxy supports
+type ProtocolSupport struct {
+	HTTP   bool `json:"http"`
+	HTTPS  bool `json:"https"`
+	HTTP2  bool `json:"http2"`
+	HTTP3  bool `json:"http3"`
+	SOCKS4 bool `json:"socks4"`
+	SOCKS5 bool `json:"socks5"`
 }
 
 // SummaryOutput represents summary statistics for output
@@ -69,6 +82,14 @@ func ConvertToOutputFormatWithSanitizer(results []*proxy.ProxyResult, s *sanitiz
 			Timestamp:      time.Now(),
 			Error:          errorMsg,
 			Type:           s.SanitizeString(string(result.Type)),
+			ProtocolSupport: ProtocolSupport{
+				HTTP:   result.SupportsHTTP,
+				HTTPS:  result.SupportsHTTPS,
+				HTTP2:  result.SupportsHTTP2,
+				HTTP3:  result.SupportsHTTP3,
+				SOCKS4: result.Type == proxy.ProxyTypeSOCKS4,
+				SOCKS5: result.Type == proxy.ProxyTypeSOCKS5,
+			},
 		}
 	}
 	return output

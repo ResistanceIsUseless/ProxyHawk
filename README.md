@@ -53,8 +53,9 @@ make docker-run    # Run in container
 
 ### Core Proxy Testing
 - Concurrent proxy checking using goroutines with configurable concurrency
-- Support for HTTP, HTTPS, SOCKS4, and SOCKS5 proxies
+- Support for HTTP, HTTPS, HTTP/2, HTTP/3, SOCKS4, and SOCKS5 proxies
 - Automatic proxy type detection and validation
+- HTTP/2 and HTTP/3 protocol support with automatic detection
 - Detailed timing and performance metrics
 - Multiple output formats (text, JSON, working proxies only)
 
@@ -151,6 +152,10 @@ Rate Limiting:
 - -rate-limit: Enable rate limiting to prevent overwhelming target servers
 - -rate-delay: Delay between requests (e.g. 500ms, 1s, 2s) (default: 1s)
 - -rate-per-host: Apply rate limiting per host instead of globally (default: true)
+
+Protocol Support:
+- -http2: Enable HTTP/2 protocol detection and support
+- -http3: Enable HTTP/3 protocol detection and support (experimental)
 ```
 ### Example Commands
 
@@ -212,6 +217,11 @@ Check proxies and save working anonymous ones to a separate file:
 Check proxies with rate limiting to avoid IP bans:
 ```bash
 ./proxyhawk -l proxies.txt -rate-limit -rate-delay 2s
+```
+
+Test proxies with HTTP/2 and HTTP/3 support:
+```bash
+./proxyhawk -l proxies.txt -http2 -http3 -v
 ```
 
 ### Output Formats

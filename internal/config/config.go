@@ -59,6 +59,10 @@ type Config struct {
 
 	// Connection pool settings
 	ConnectionPool ConnectionPoolConfig `yaml:"connection_pool"`
+
+	// HTTP/2 and HTTP/3 settings
+	EnableHTTP2 bool `yaml:"enable_http2"`
+	EnableHTTP3 bool `yaml:"enable_http3"`
 }
 
 // TestURLConfig contains configuration for test URLs
@@ -218,5 +222,9 @@ func GetDefaultConfig() *Config {
 			DisableKeepAlives:     false,
 			DisableCompression:    false,
 		},
+
+		// HTTP/2 and HTTP/3 settings
+		EnableHTTP2: true,  // Enable HTTP/2 by default
+		EnableHTTP3: false, // Disable HTTP/3 by default (requires additional dependencies)
 	}
 }

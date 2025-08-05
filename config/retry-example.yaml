@@ -1,0 +1,98 @@
+# ProxyHawk Configuration with Retry Mechanism Example
+# This example shows how to configure ProxyHawk with retry mechanism and exponential backoff
+
+# Basic settings
+timeout: 30
+concurrency: 50
+user_agent: "ProxyHawk-Scanner/1.0"
+
+# Retry mechanism configuration
+retry_enabled: true                    # Enable retry mechanism
+max_retries: 3                         # Maximum number of retry attempts (default: 3)
+initial_retry_delay: 1s                # Initial delay before first retry (default: 1s)
+max_retry_delay: 30s                   # Maximum delay between retries (default: 30s)
+backoff_factor: 2.0                    # Exponential backoff multiplier (default: 2.0)
+
+# Custom retryable error patterns (optional - defaults will be used if not specified)
+retryable_errors:
+  - "connection refused"               # Connection was refused by the target
+  - "connection timed out"             # Connection attempt timed out
+  - "connection reset"                 # Connection was reset by peer
+  - "network unreachable"              # Network is unreachable
+  - "host unreachable"                 # Host is unreachable
+  - "no route to host"                 # No route to host
+  - "operation timed out"              # Operation timed out
+  - "dial tcp"                         # TCP dial errors
+  - "context deadline exceeded"        # Context timeout
+  - "i/o timeout"                      # I/O timeout
+  - "EOF"                              # Unexpected end of file
+  - "temporary failure"                # Temporary DNS or network failure
+  - "read: connection reset"           # Connection reset during read
+  - "write: broken pipe"               # Broken pipe during write
+
+# Rate limiting (works together with retry mechanism)
+rate_limit_enabled: true
+rate_limit_delay: 100ms                # Lower delay due to retry mechanism handling failures
+rate_limit_per_proxy: true             # Per-proxy rate limiting for better granularity
+
+# Connection pool (helps with retry performance)
+connection_pool:
+  max_idle_conns: 200
+  max_idle_conns_per_host: 20
+  max_conns_per_host: 100
+  idle_conn_timeout: 120s
+  keep_alive_timeout: 45s
+  tls_handshake_timeout: 15s
+
+# Test configuration
+test_urls:
+  default_url: "https://api.ipify.org?format=json"
+  test_urls:
+    - url: "https://httpbin.org/ip"
+      expect_text: '"origin"'
+    - url: "https://icanhazip.com"
+      expect_text: "."
+
+# Validation settings
+validation:
+  min_response_bytes: 10
+  disallowed_keywords:
+    - "Access Denied"
+    - "Proxy Error"
+    - "Connection Failed"
+    - "Timeout Error"
+
+# Metrics to monitor retry statistics
+metrics:
+  enabled: true
+  listen_addr: ":9090"
+  path: "/metrics"
+
+# Advanced checks (may benefit from retry mechanism)
+advanced_checks:
+  test_protocol_smuggling: true
+  test_dns_rebinding: true
+  test_ipv6: true
+  test_host_header_injection: true
+  test_ssrf: true
+  test_http_methods:
+    - "GET"
+    - "POST"
+    - "HEAD"
+
+# Cloud provider detection
+enable_cloud_checks: true
+cloud_providers:
+  - name: "AWS"
+    metadata_ips:
+      - "169.254.169.254"
+  - name: "GCP" 
+    metadata_ips:
+      - "169.254.169.254"
+      - "metadata.google.internal"
+
+# Default headers
+default_headers:
+  Accept: "application/json,text/html;q=0.9,*/*;q=0.8"
+  Accept-Language: "en-US,en;q=0.9"
+  Cache-Control: "no-cache"

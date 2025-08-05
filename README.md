@@ -24,6 +24,31 @@ go build -o proxyhawk cmd/proxyhawk/main.go
 go install github.com/ResistanceIsUseless/proxyhawk@latest
 ```
 
+### Docker (Recommended for Production)
+```bash
+# Quick start with Docker
+docker build -t proxyhawk .
+docker run --rm -v $(pwd)/proxies.txt:/app/proxies.txt:ro -v $(pwd)/output:/app/output proxyhawk -l proxies.txt -o output/results.txt --no-ui
+
+# Or use the deployment script for easier management
+./scripts/deploy.sh setup
+./scripts/deploy.sh run-basic
+
+# Full monitoring stack with Prometheus + Grafana
+docker-compose up -d
+# Access Grafana at http://localhost:3000 (admin/admin)
+```
+
+### Using Makefile
+```bash
+# Development workflow
+make deps          # Install dependencies
+make build         # Build binary
+make test          # Run tests
+make docker-build  # Build Docker image
+make docker-run    # Run in container
+```
+
 ## Features
 
 ### Core Proxy Testing
@@ -94,7 +119,7 @@ Note: The scheme (http://, https://, socks5://) is optional. If not provided, ht
 
 2. Run the proxy checker:
 ```bash
-go run main.go -l proxies.txt
+./proxyhawk -l proxies.txt
 ```
 
 ### Command Line Options
@@ -131,62 +156,62 @@ Rate Limiting:
 
 Basic check against default URL:
 ```bash
-go run main.go -l proxies.txt
+./proxyhawk -l proxies.txt
 ```
 
-Check against specific URL with increased concurrency and longer timeout:
+Check with increased concurrency and longer timeout:
 ```bash
-go run main.go -l proxies.txt -u https://example.com -c 20 -t 15s
+./proxyhawk -l proxies.txt -c 20 -t 15s
 ```
 
 Enable comprehensive security testing with debug output:
 ```bash
-go run main.go -l proxies.txt -d -config security_config.yaml
+./proxyhawk -l proxies.txt -d -config security_config.yaml
 ```
 
 Save results to text and JSON files:
 ```bash
-go run main.go -l proxies.txt -o results.txt -j results.json
+./proxyhawk -l proxies.txt -o results.txt -j results.json
 ```
 
 Test with custom security configuration:
 ```bash
-go run main.go -l proxies.txt -config custom_config.yaml -d -t 20s
+./proxyhawk -l proxies.txt -config custom_config.yaml -d -t 20s
 ```
 
 Run without UI for automation:
 ```bash
-go run main.go -l proxies.txt -no-ui -v -o results.txt
+./proxyhawk -l proxies.txt -no-ui -v -o results.txt
 ```
 
 Maximum performance testing:
 ```bash
-go run main.go -l proxies.txt -c 50 -t 5s
+./proxyhawk -l proxies.txt -c 50 -t 5s
 ```
 
 Debug mode with specific URL and timeout:
 ```bash
-go run main.go -l proxies.txt -d -u https://api.example.com/test -t 30s
+./proxyhawk -l proxies.txt -d -t 30s
 ```
 
 Advanced security testing with custom output files:
 ```bash
-go run main.go -l proxies.txt -d -o security_results.txt -j security_results.json -t 25s -c 30
+./proxyhawk -l proxies.txt -d -o security_results.txt -j security_results.json -t 25s -c 30
 ```
 
 Check proxies and save working ones to a separate file:
 ```bash
-go run main.go -l proxies.txt -wp working_proxies.txt
+./proxyhawk -l proxies.txt -wp working_proxies.txt
 ```
 
 Check proxies and save working anonymous ones to a separate file:
 ```bash
-go run main.go -l proxies.txt -wpa working_anonymous_proxies.txt
+./proxyhawk -l proxies.txt -wpa working_anonymous_proxies.txt
 ```
 
 Check proxies with rate limiting to avoid IP bans:
 ```bash
-go run main.go -l proxies.txt -rate-limit -rate-delay 2s
+./proxyhawk -l proxies.txt -rate-limit -rate-delay 2s
 ```
 
 ### Output Formats

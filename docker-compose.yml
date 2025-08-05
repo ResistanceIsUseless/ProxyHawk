@@ -1,0 +1,141 @@
+version: '3.8'
+
+services:
+  # Basic ProxyHawk service for proxy checking
+  proxyhawk:
+    build: .
+    container_name: proxyhawk
+    volumes:
+      # Mount proxy list file
+      - ./test-proxies.txt:/app/proxies.txt:ro
+      # Mount custom configuration
+      - ./config:/app/config:ro
+      # Mount output directory for results
+      - ./output:/app/output
+    command: [
+      "--config", "config/default.yaml",
+      "-l", "proxies.txt",
+      "-o", "output/results.txt",
+      "-j", "output/results.json",
+      "--no-ui",
+      "-v"
+    ]
+    restart: unless-stopped
+    networks:
+      - proxyhawk-network
+
+  # ProxyHawk with metrics enabled for monitoring
+  proxyhawk-metrics:
+    build: .
+    container_name: proxyhawk-metrics
+    ports:
+      - "9090:9090"  # Prometheus metrics endpoint
+    volumes:
+      - ./test-proxies.txt:/app/proxies.txt:ro
+      - ./config:/app/config:ro
+      - ./output:/app/output
+    command: [
+      "--config", "config/metrics-example.yaml",
+      "-l", "proxies.txt",
+      "-o", "output/metrics-results.txt",
+      "-j", "output/metrics-results.json",
+      "--metrics",
+      "--metrics-addr", ":9090",
+      "--no-ui",
+      "-v"
+    ]
+    restart: unless-stopped
+    networks:
+      - proxyhawk-network
+    depends_on:
+      - prometheus
+
+  # ProxyHawk with authentication support
+  proxyhawk-auth:
+    build: .
+    container_name: proxyhawk-auth
+    volumes:
+      - ./test-proxies.txt:/app/proxies.txt:ro
+      - ./config:/app/config:ro
+      - ./output:/app/output
+    command: [
+      "--config", "config/auth-example.yaml",
+      "-l", "proxies.txt",
+      "-o", "output/auth-results.txt",
+      "-j", "output/auth-results.json",
+      "--no-ui",
+      "-v"
+    ]
+    restart: unless-stopped
+    networks:
+      - proxyhawk-network
+
+  # ProxyHawk with advanced security testing
+  proxyhawk-security:
+    build: .
+    container_name: proxyhawk-security
+    volumes:
+      - ./test-proxies.txt:/app/proxies.txt:ro
+      - ./config:/app/config:ro
+      - ./output:/app/output
+    command: [
+      "--config", "config/production.yaml", 
+      "-l", "proxies.txt",
+      "-o", "output/security-results.txt",
+      "-j", "output/security-results.json",
+      "--no-ui",
+      "-v",
+      "-d"  # Enable debug for detailed security testing output
+    ]
+    restart: unless-stopped
+    networks:
+      - proxyhawk-network
+
+  # Prometheus for metrics collection (optional)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./docker/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    restart: unless-stopped
+    networks:
+      - proxyhawk-network
+
+  # Grafana for metrics visualization (optional)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./docker/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    restart: unless-stopped
+    networks:
+      - proxyhawk-network
+    depends_on:
+      - prometheus
+
+volumes:
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+
+networks:
+  proxyhawk-network:
+    driver: bridge

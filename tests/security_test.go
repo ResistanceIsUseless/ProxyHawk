@@ -19,7 +19,7 @@ func TestAdvancedChecks(t *testing.T) {
 			TestIPv6:                true,
 			TestHTTPMethods:         []string{"GET", "POST", "PUT"},
 		}
-		
+
 		if !config.TestProtocolSmuggling {
 			t.Error("Protocol smuggling check should be enabled")
 		}
@@ -43,14 +43,14 @@ func TestAdvancedChecks(t *testing.T) {
 	t.Run("Checker Creation with Advanced Checks", func(t *testing.T) {
 		// Test that proxy checker can be created with advanced checks
 		checkerConfig := proxy.Config{
-			Timeout: 10 * time.Second,
+			Timeout:       10 * time.Second,
 			ValidationURL: "http://example.com",
 			AdvancedChecks: proxy.AdvancedChecks{
 				TestProtocolSmuggling: true,
 				TestDNSRebinding:      true,
 			},
 		}
-		
+
 		checker := proxy.NewChecker(checkerConfig, true)
 		if checker == nil {
 			t.Error("Should be able to create checker with advanced checks")
@@ -60,7 +60,7 @@ func TestAdvancedChecks(t *testing.T) {
 	t.Run("Disabled Advanced Checks", func(t *testing.T) {
 		// Test default configuration (all checks disabled)
 		config := proxy.AdvancedChecks{}
-		
+
 		if config.TestProtocolSmuggling {
 			t.Error("Protocol smuggling check should be disabled by default")
 		}

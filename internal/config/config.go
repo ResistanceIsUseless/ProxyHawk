@@ -4,28 +4,44 @@ import (
 	"os"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/ResistanceIsUseless/ProxyHawk/cloudcheck"
 	"github.com/ResistanceIsUseless/ProxyHawk/internal/errors"
 	"github.com/ResistanceIsUseless/ProxyHawk/internal/proxy"
-	"gopkg.in/yaml.v3"
 )
 
 // Config represents the main application configuration
 type Config struct {
-	Timeout              int                    `yaml:"timeout"`
-	InsecureSkipVerify   bool                   `yaml:"insecure_skip_verify"`
-	EnableCloudChecks    bool                   `yaml:"enable_cloud_checks"`
-	EnableAnonymityCheck bool                   `yaml:"enable_anonymity_check"`
-	RateLimitEnabled     bool                   `yaml:"rate_limit_enabled"`
-	RateLimitDelay       time.Duration          `yaml:"rate_limit_delay"`
-	RateLimitPerHost     bool                   `yaml:"rate_limit_per_host"`
-	DefaultHeaders       map[string]string      `yaml:"default_headers"`
-	UserAgent            string                 `yaml:"user_agent"`
-	Validation           ValidationConfig       `yaml:"validation"`
-	TestURLs             TestURLConfig          `yaml:"test_urls"`
-	Concurrency          int                    `yaml:"concurrency"`
-	InteractshURL        string                 `yaml:"interactsh_url"`
-	InteractshToken      string                 `yaml:"interactsh_token"`
+	Timeout              int           `yaml:"timeout"`
+	InsecureSkipVerify   bool          `yaml:"insecure_skip_verify"`
+	EnableCloudChecks    bool          `yaml:"enable_cloud_checks"`
+	EnableAnonymityCheck bool          `yaml:"enable_anonymity_check"`
+	RateLimitEnabled     bool          `yaml:"rate_limit_enabled"`
+	RateLimitDelay       time.Duration `yaml:"rate_limit_delay"`
+	RateLimitPerHost     bool          `yaml:"rate_limit_per_host"`
+	RateLimitPerProxy    bool          `yaml:"rate_limit_per_proxy"`
+
+	// Retry settings
+	RetryEnabled      bool          `yaml:"retry_enabled"`
+	MaxRetries        int           `yaml:"max_retries"`
+	InitialRetryDelay time.Duration `yaml:"initial_retry_delay"`
+	MaxRetryDelay     time.Duration `yaml:"max_retry_delay"`
+	BackoffFactor     float64       `yaml:"backoff_factor"`
+	RetryableErrors   []string      `yaml:"retryable_errors"`
+
+	// Authentication settings
+	AuthEnabled     bool              `yaml:"auth_enabled"`
+	DefaultUsername string            `yaml:"default_username"`
+	DefaultPassword string            `yaml:"default_password"`
+	AuthMethods     []string          `yaml:"auth_methods"`
+	DefaultHeaders  map[string]string `yaml:"default_headers"`
+	UserAgent       string            `yaml:"user_agent"`
+	Validation      ValidationConfig  `yaml:"validation"`
+	TestURLs        TestURLConfig     `yaml:"test_urls"`
+	Concurrency     int               `yaml:"concurrency"`
+	InteractshURL   string            `yaml:"interactsh_url"`
+	InteractshToken string            `yaml:"interactsh_token"`
 
 	// Cloud provider settings
 	CloudProviders []cloudcheck.CloudProvider `yaml:"cloud_providers"`
@@ -37,6 +53,12 @@ type Config struct {
 	RequireStatusCode   int      `yaml:"require_status_code"`
 	RequireContentMatch string   `yaml:"require_content_match"`
 	RequireHeaderFields []string `yaml:"require_header_fields"`
+
+	// Metrics settings
+	Metrics MetricsConfig `yaml:"metrics"`
+
+	// Connection pool settings
+	ConnectionPool ConnectionPoolConfig `yaml:"connection_pool"`
 }
 
 // TestURLConfig contains configuration for test URLs
@@ -55,6 +77,26 @@ type TestURL struct {
 type ValidationConfig struct {
 	DisallowedKeywords []string `yaml:"disallowed_keywords"`
 	MinResponseBytes   int      `yaml:"min_response_bytes"`
+}
+
+// MetricsConfig contains metrics and monitoring settings
+type MetricsConfig struct {
+	Enabled    bool   `yaml:"enabled"`
+	ListenAddr string `yaml:"listen_addr"`
+	Path       string `yaml:"path"`
+}
+
+// ConnectionPoolConfig contains HTTP connection pool settings
+type ConnectionPoolConfig struct {
+	MaxIdleConns          int           `yaml:"max_idle_conns"`
+	MaxIdleConnsPerHost   int           `yaml:"max_idle_conns_per_host"`
+	MaxConnsPerHost       int           `yaml:"max_conns_per_host"`
+	IdleConnTimeout       time.Duration `yaml:"idle_conn_timeout"`
+	KeepAliveTimeout      time.Duration `yaml:"keep_alive_timeout"`
+	TLSHandshakeTimeout   time.Duration `yaml:"tls_handshake_timeout"`
+	ExpectContinueTimeout time.Duration `yaml:"expect_continue_timeout"`
+	DisableKeepAlives     bool          `yaml:"disable_keep_alives"`
+	DisableCompression    bool          `yaml:"disable_compression"`
 }
 
 // LoadConfig loads configuration from a YAML file
@@ -109,9 +151,33 @@ func GetDefaultConfig() *Config {
 		EnableAnonymityCheck: false,
 
 		// Default rate limiting settings
-		RateLimitEnabled: false,
-		RateLimitDelay:   1 * time.Second,
-		RateLimitPerHost: true,
+		RateLimitEnabled:  false,
+		RateLimitDelay:    1 * time.Second,
+		RateLimitPerHost:  true,
+		RateLimitPerProxy: false,
+
+		// Default retry settings
+		RetryEnabled:      false, // Disabled by default for backward compatibility
+		MaxRetries:        3,
+		InitialRetryDelay: 1 * time.Second,
+		MaxRetryDelay:     30 * time.Second,
+		BackoffFactor:     2.0,
+		RetryableErrors: []string{
+			"connection refused",
+			"connection timed out",
+			"connection reset",
+			"network unreachable",
+			"host unreachable",
+			"operation timed out",
+			"context deadline exceeded",
+			"i/o timeout",
+		},
+
+		// Default authentication settings
+		AuthEnabled:     false, // Disabled by default for security
+		DefaultUsername: "",
+		DefaultPassword: "",
+		AuthMethods:     []string{"basic"},
 
 		DefaultHeaders: map[string]string{
 			"Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
@@ -131,6 +197,26 @@ func GetDefaultConfig() *Config {
 				"Service Unavailable",
 			},
 			MinResponseBytes: 100,
+		},
+
+		// Default metrics settings
+		Metrics: MetricsConfig{
+			Enabled:    false,
+			ListenAddr: ":9090",
+			Path:       "/metrics",
+		},
+
+		// Default connection pool settings
+		ConnectionPool: ConnectionPoolConfig{
+			MaxIdleConns:          100,
+			MaxIdleConnsPerHost:   10,
+			MaxConnsPerHost:       50,
+			IdleConnTimeout:       90 * time.Second,
+			KeepAliveTimeout:      30 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+			DisableKeepAlives:     false,
+			DisableCompression:    false,
 		},
 	}
 }

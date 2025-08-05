@@ -1,63 +1,71 @@
 package proxy
 
 import (
-	"context"
 	"crypto/tls"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"time"
-
-	"h12.io/socks"
 )
 
 // createClient creates an HTTP client for the given proxy type
 func (c *Checker) createClient(proxyURL *url.URL, scheme string, result *ProxyResult) (*http.Client, error) {
 	if c.debug {
 		result.DebugInfo += fmt.Sprintf("[DEBUG] Creating client for scheme: %s\n", scheme)
-		result.DebugInfo += fmt.Sprintf("[DEBUG] Proxy URL: %s\n", proxyURL.String())
+		result.DebugInfo += fmt.Sprintf("[DEBUG] Proxy URL: %s\n", c.cleanProxyURL(proxyURL))
 	}
 
-	transport := &http.Transport{
-		TLSHandshakeTimeout:   c.config.Timeout / 2,
-		ResponseHeaderTimeout: c.config.Timeout / 2,
-		ExpectContinueTimeout: 1 * time.Second,
-		MaxIdleConns:          100,
-		MaxIdleConnsPerHost:   10,
-		IdleConnTimeout:       90 * time.Second,
-		DisableKeepAlives:     true,
-		ForceAttemptHTTP2:     false,
-		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: true,
-		},
+	// Extract authentication information
+	auth := c.getProxyAuth(proxyURL, result)
+
+	// Try to use connection pool if available
+	if c.config.ConnectionPool != nil {
+		if pool, ok := c.config.ConnectionPool.(interface {
+			GetClient(string, time.Duration) (*http.Client, error)
+		}); ok {
+			fullProxyURL := fmt.Sprintf("%s://%s", scheme, proxyURL.Host)
+			client, err := pool.GetClient(fullProxyURL, c.config.Timeout)
+			if err == nil {
+				if c.debug {
+					result.DebugInfo += fmt.Sprintf("[DEBUG] Using connection pool client for: %s\n", fullProxyURL)
+				}
+				return client, nil
+			}
+			if c.debug {
+				result.DebugInfo += fmt.Sprintf("[DEBUG] Connection pool failed, falling back to manual client creation: %v\n", err)
+			}
+		}
 	}
+
+	// Fallback to manual client creation with authentication support
+	var transport *http.Transport
 
 	switch {
 	case scheme == "http" || scheme == "https":
-		transport.Proxy = func(_ *http.Request) (*url.URL, error) {
-			proxyURLWithScheme := fmt.Sprintf("%s://%s", scheme, proxyURL.Host)
-			if c.debug {
-				result.DebugInfo += fmt.Sprintf("[DEBUG] Setting up %s proxy: %s\n", scheme, proxyURLWithScheme)
-			}
-			return url.Parse(proxyURLWithScheme)
-		}
+		transport = c.createAuthenticatedHTTPTransport(proxyURL, scheme, auth, result)
 
 	case scheme == "socks4" || scheme == "socks5":
-		dialSocksProxy := socks.Dial(fmt.Sprintf("%s://%s", scheme, proxyURL.Host))
-		if c.debug {
-			result.DebugInfo += fmt.Sprintf("[DEBUG] Setting up %s proxy with dial function\n", scheme)
+		transport = &http.Transport{
+			TLSHandshakeTimeout:   c.config.Timeout / 2,
+			ResponseHeaderTimeout: c.config.Timeout / 2,
+			ExpectContinueTimeout: 1 * time.Second,
+			MaxIdleConns:          100,
+			MaxIdleConnsPerHost:   10,
+			IdleConnTimeout:       90 * time.Second,
+			DisableKeepAlives:     true,
+			ForceAttemptHTTP2:     false,
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true,
+			},
 		}
-		transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-			if c.debug {
-				result.DebugInfo += fmt.Sprintf("[DEBUG] Dialing %s address: %s\n", network, addr)
-			}
-			conn, err := dialSocksProxy(network, addr)
-			if err != nil && c.debug {
-				result.DebugInfo += fmt.Sprintf("[DEBUG] Dial error: %v\n", err)
-			}
-			return conn, err
+		transport.DialContext = c.createAuthenticatedSOCKSDialer(proxyURL, scheme, auth, result)
+	}
+
+	// Set TLS config if not already set
+	if transport.TLSClientConfig == nil {
+		transport.TLSClientConfig = &tls.Config{
+			InsecureSkipVerify: true,
 		}
 	}
 

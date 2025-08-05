@@ -33,9 +33,24 @@ type Config struct {
 	UseRDNS            bool // Whether to use rDNS lookup for host headers
 
 	// Rate limiting settings
-	RateLimitEnabled bool          // Whether rate limiting is enabled
-	RateLimitDelay   time.Duration // Delay between requests to the same host
-	RateLimitPerHost bool          // Whether to apply rate limiting per host or globally
+	RateLimitEnabled  bool          // Whether rate limiting is enabled
+	RateLimitDelay    time.Duration // Delay between requests to the same host
+	RateLimitPerHost  bool          // Whether to apply rate limiting per host or globally
+	RateLimitPerProxy bool          // Whether to apply rate limiting per individual proxy
+
+	// Retry settings
+	RetryEnabled    bool          // Whether retry mechanism is enabled
+	MaxRetries      int           // Maximum number of retry attempts (default: 3)
+	InitialDelay    time.Duration // Initial delay before first retry (default: 1s)
+	MaxDelay        time.Duration // Maximum delay between retries (default: 30s)
+	BackoffFactor   float64       // Exponential backoff multiplier (default: 2.0)
+	RetryableErrors []string      // List of error patterns that should trigger retries
+
+	// Authentication settings
+	AuthEnabled     bool     // Whether proxy authentication is enabled
+	DefaultUsername string   // Default username for proxies (if not in URL)
+	DefaultPassword string   // Default password for proxies (if not in URL)
+	AuthMethods     []string // Supported authentication methods (basic, digest)
 
 	// Response validation settings
 	RequireStatusCode   int
@@ -44,12 +59,14 @@ type Config struct {
 
 	// Advanced security checks
 	AdvancedChecks AdvancedChecks
-	
+
 	// Interactsh settings (used only when advanced checks are enabled)
 	InteractshURL   string // URL of the Interactsh server (optional)
 	InteractshToken string // Token for the Interactsh server (optional)
-}
 
+	// Connection pool settings
+	ConnectionPool interface{} // Will be set to *pool.ConnectionPool, but using interface{} to avoid circular import
+}
 
 // CheckResult represents the result of a single check
 type CheckResult struct {
@@ -81,10 +98,10 @@ type ProxyResult struct {
 	AdvancedChecksPassed  bool
 	AdvancedChecksDetails map[string]interface{}
 	DebugInfo             string
-	
+
 	// New fields for protocol support
-	SupportsHTTP          bool
-	SupportsHTTPS         bool
+	SupportsHTTP  bool
+	SupportsHTTPS bool
 }
 
 // Checker represents the main proxy checker

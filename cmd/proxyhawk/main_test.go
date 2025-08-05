@@ -57,7 +57,7 @@ func TestLoadProxies(t *testing.T) {
 	// Create temporary file with test proxies
 	tempFile := filepath.Join(t.TempDir(), "proxies.txt")
 	testProxies := `
-203.0.113.1:8080
+8.8.8.8:8080
 https://proxy.example.com:443
 invalid:proxy:format
 socks5://socks.example.com:1080
@@ -72,7 +72,8 @@ socks5://socks.example.com:1080
 		t.Errorf("loadProxies() error = %v", err)
 	}
 
-	// Check number of valid proxies - 3 valid, 2 invalid (invalid format + loopback IP)
+	// Check number of valid proxies - 3 valid: 8.8.8.8:8080, proxy.example.com:443, socks.example.com:1080
+	// 2 invalid: invalid:proxy:format + 127.0.0.1:9000 (loopback IP)
 	expectedValidCount := 3
 	if len(proxies) != expectedValidCount {
 		t.Errorf("loadProxies() got %v proxies, want %v", len(proxies), expectedValidCount)

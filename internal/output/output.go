@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ResistanceIsUseless/ProxyHawk/internal/proxy"
+	"github.com/ResistanceIsUseless/ProxyHawk/internal/sanitizer"
 )
 
 // ProxyResultOutput represents a proxy result for output formatting
@@ -28,40 +29,46 @@ type ProxyResultOutput struct {
 
 // SummaryOutput represents summary statistics for output
 type SummaryOutput struct {
-	TotalProxies         int                  `json:"total_proxies"`
-	WorkingProxies       int                  `json:"working_proxies"`
-	InteractshProxies    int                  `json:"interactsh_proxies"`
-	AnonymousProxies     int                  `json:"anonymous_proxies"`
-	CloudProxies         int                  `json:"cloud_proxies"`
-	InternalAccessCount  int                  `json:"internal_access_count"`
-	MetadataAccessCount  int                  `json:"metadata_access_count"`
-	SuccessRate          float64              `json:"success_rate"`
-	AverageSpeed         time.Duration        `json:"average_speed_ns"`
-	Results              []ProxyResultOutput  `json:"results"`
+	TotalProxies        int                 `json:"total_proxies"`
+	WorkingProxies      int                 `json:"working_proxies"`
+	InteractshProxies   int                 `json:"interactsh_proxies"`
+	AnonymousProxies    int                 `json:"anonymous_proxies"`
+	CloudProxies        int                 `json:"cloud_proxies"`
+	InternalAccessCount int                 `json:"internal_access_count"`
+	MetadataAccessCount int                 `json:"metadata_access_count"`
+	SuccessRate         float64             `json:"success_rate"`
+	AverageSpeed        time.Duration       `json:"average_speed_ns"`
+	Results             []ProxyResultOutput `json:"results"`
 }
 
-// ConvertToOutputFormat converts internal proxy results to output format
+// ConvertToOutputFormat converts internal proxy results to output format with sanitization
 func ConvertToOutputFormat(results []*proxy.ProxyResult) []ProxyResultOutput {
+	return ConvertToOutputFormatWithSanitizer(results, sanitizer.DefaultSanitizer())
+}
+
+// ConvertToOutputFormatWithSanitizer converts internal proxy results to output format with custom sanitization
+func ConvertToOutputFormatWithSanitizer(results []*proxy.ProxyResult, s *sanitizer.Sanitizer) []ProxyResultOutput {
 	output := make([]ProxyResultOutput, len(results))
 	for i, result := range results {
 		errorMsg := ""
 		if result.Error != nil {
-			errorMsg = result.Error.Error()
+			errorMsg = s.SanitizeError(result.Error.Error())
 		}
+
 		output[i] = ProxyResultOutput{
-			Proxy:          result.ProxyURL,
+			Proxy:          s.SanitizeURL(result.ProxyURL),
 			Working:        result.Working,
 			Speed:          result.Speed,
 			InteractshTest: false, // Will be set if interactsh tests were run
-			RealIP:         result.RealIP,
-			ProxyIP:        result.ProxyIP,
+			RealIP:         s.SanitizeIP(result.RealIP),
+			ProxyIP:        s.SanitizeIP(result.ProxyIP),
 			IsAnonymous:    result.IsAnonymous,
-			CloudProvider:  result.CloudProvider,
+			CloudProvider:  s.SanitizeString(result.CloudProvider),
 			InternalAccess: result.InternalAccess,
 			MetadataAccess: result.MetadataAccess,
 			Timestamp:      time.Now(),
 			Error:          errorMsg,
-			Type:           string(result.Type),
+			Type:           s.SanitizeString(string(result.Type)),
 		}
 	}
 	return output
@@ -70,7 +77,7 @@ func ConvertToOutputFormat(results []*proxy.ProxyResult) []ProxyResultOutput {
 // GenerateSummary creates a summary from proxy results
 func GenerateSummary(results []*proxy.ProxyResult) SummaryOutput {
 	output := ConvertToOutputFormat(results)
-	
+
 	summary := SummaryOutput{
 		TotalProxies: len(results),
 		Results:      output,
@@ -87,19 +94,19 @@ func GenerateSummary(results []*proxy.ProxyResult) SummaryOutput {
 				speedCount++
 			}
 		}
-		
+
 		if result.IsAnonymous {
 			summary.AnonymousProxies++
 		}
-		
+
 		if result.CloudProvider != "" {
 			summary.CloudProxies++
 		}
-		
+
 		if result.InternalAccess {
 			summary.InternalAccessCount++
 		}
-		
+
 		if result.MetadataAccess {
 			summary.MetadataAccessCount++
 		}
@@ -116,8 +123,13 @@ func GenerateSummary(results []*proxy.ProxyResult) SummaryOutput {
 	return summary
 }
 
-// WriteTextOutput writes results to a text file
+// WriteTextOutput writes results to a text file with sanitization
 func WriteTextOutput(filename string, results []ProxyResultOutput, summary SummaryOutput) error {
+	return WriteTextOutputWithSanitizer(filename, results, summary, sanitizer.DefaultSanitizer())
+}
+
+// WriteTextOutputWithSanitizer writes results to a text file with custom sanitization
+func WriteTextOutputWithSanitizer(filename string, results []ProxyResultOutput, summary SummaryOutput, s *sanitizer.Sanitizer) error {
 	file, err := os.Create(filename)
 	if err != nil {
 		return err
@@ -144,20 +156,25 @@ func WriteTextOutput(filename string, results []ProxyResultOutput, summary Summa
 			}
 		}
 
-		fmt.Fprintf(file, "%s %s", status, result.Proxy)
-		
+		// Results are already sanitized, but we apply additional text-specific sanitization
+		proxy := s.SanitizeString(result.Proxy)
+		fmt.Fprintf(file, "%s %s", status, proxy)
+
 		if result.Working {
 			fmt.Fprintf(file, " - %.2fs", result.Speed.Seconds())
 			if result.Type != "" {
-				fmt.Fprintf(file, " (%s)", result.Type)
+				proxyType := s.SanitizeString(result.Type)
+				fmt.Fprintf(file, " (%s)", proxyType)
 			}
 			if result.CloudProvider != "" {
-				fmt.Fprintf(file, " [%s]", result.CloudProvider)
+				cloudProvider := s.SanitizeString(result.CloudProvider)
+				fmt.Fprintf(file, " [%s]", cloudProvider)
 			}
 		} else if result.Error != "" {
-			fmt.Fprintf(file, " - Error: %s", result.Error)
+			errorMsg := s.SanitizeError(result.Error)
+			fmt.Fprintf(file, " - Error: %s", errorMsg)
 		}
-		
+
 		fmt.Fprintf(file, "\n")
 	}
 
@@ -170,7 +187,7 @@ func WriteTextOutput(filename string, results []ProxyResultOutput, summary Summa
 	fmt.Fprintf(file, "Anonymous proxies: %d\n", summary.AnonymousProxies)
 	fmt.Fprintf(file, "Cloud proxies: %d\n", summary.CloudProxies)
 	fmt.Fprintf(file, "Success rate: %.2f%%\n", summary.SuccessRate)
-	
+
 	if summary.AverageSpeed > 0 {
 		fmt.Fprintf(file, "Average speed: %.2fs\n", summary.AverageSpeed.Seconds())
 	}
@@ -178,8 +195,16 @@ func WriteTextOutput(filename string, results []ProxyResultOutput, summary Summa
 	return nil
 }
 
-// WriteJSONOutput writes results to a JSON file
+// WriteJSONOutput writes results to a JSON file with sanitization
 func WriteJSONOutput(filename string, summary SummaryOutput) error {
+	return WriteJSONOutputWithSanitizer(filename, summary, sanitizer.DefaultSanitizer())
+}
+
+// WriteJSONOutputWithSanitizer writes results to a JSON file with custom sanitization
+func WriteJSONOutputWithSanitizer(filename string, summary SummaryOutput, s *sanitizer.Sanitizer) error {
+	// Sanitize the summary before writing
+	sanitizedSummary := sanitizeSummaryOutput(summary, s)
+
 	file, err := os.Create(filename)
 	if err != nil {
 		return err
@@ -188,11 +213,24 @@ func WriteJSONOutput(filename string, summary SummaryOutput) error {
 
 	encoder := json.NewEncoder(file)
 	encoder.SetIndent("", "  ")
-	return encoder.Encode(summary)
+	encoder.SetEscapeHTML(true) // Ensure HTML escaping is enabled
+	return encoder.Encode(sanitizedSummary)
 }
 
-// WriteWorkingProxiesOutput writes only working proxies to a file
+// sanitizeSummaryOutput applies sanitization to all string fields in summary
+func sanitizeSummaryOutput(summary SummaryOutput, s *sanitizer.Sanitizer) SummaryOutput {
+	// The results are already sanitized by ConvertToOutputFormatWithSanitizer
+	// This function is for future extensibility if more fields need sanitization
+	return summary
+}
+
+// WriteWorkingProxiesOutput writes only working proxies to a file with sanitization
 func WriteWorkingProxiesOutput(filename string, results []ProxyResultOutput) error {
+	return WriteWorkingProxiesOutputWithSanitizer(filename, results, sanitizer.DefaultSanitizer())
+}
+
+// WriteWorkingProxiesOutputWithSanitizer writes only working proxies to a file with custom sanitization
+func WriteWorkingProxiesOutputWithSanitizer(filename string, results []ProxyResultOutput, s *sanitizer.Sanitizer) error {
 	file, err := os.Create(filename)
 	if err != nil {
 		return err
@@ -204,9 +242,11 @@ func WriteWorkingProxiesOutput(filename string, results []ProxyResultOutput) err
 
 	for _, result := range results {
 		if result.Working {
-			fmt.Fprintf(file, "%s - %.2fs", result.Proxy, result.Speed.Seconds())
+			proxy := s.SanitizeURL(result.Proxy)
+			fmt.Fprintf(file, "%s - %.2fs", proxy, result.Speed.Seconds())
 			if result.Type != "" {
-				fmt.Fprintf(file, " (%s)", result.Type)
+				proxyType := s.SanitizeString(result.Type)
+				fmt.Fprintf(file, " (%s)", proxyType)
 			}
 			fmt.Fprintf(file, "\n")
 		}
@@ -215,8 +255,13 @@ func WriteWorkingProxiesOutput(filename string, results []ProxyResultOutput) err
 	return nil
 }
 
-// WriteAnonymousProxiesOutput writes only working anonymous proxies to a file
+// WriteAnonymousProxiesOutput writes only working anonymous proxies to a file with sanitization
 func WriteAnonymousProxiesOutput(filename string, results []ProxyResultOutput) error {
+	return WriteAnonymousProxiesOutputWithSanitizer(filename, results, sanitizer.DefaultSanitizer())
+}
+
+// WriteAnonymousProxiesOutputWithSanitizer writes only working anonymous proxies to a file with custom sanitization
+func WriteAnonymousProxiesOutputWithSanitizer(filename string, results []ProxyResultOutput, s *sanitizer.Sanitizer) error {
 	file, err := os.Create(filename)
 	if err != nil {
 		return err
@@ -228,9 +273,11 @@ func WriteAnonymousProxiesOutput(filename string, results []ProxyResultOutput) e
 
 	for _, result := range results {
 		if result.Working && result.IsAnonymous {
-			fmt.Fprintf(file, "%s - %.2fs", result.Proxy, result.Speed.Seconds())
+			proxy := s.SanitizeURL(result.Proxy)
+			fmt.Fprintf(file, "%s - %.2fs", proxy, result.Speed.Seconds())
 			if result.Type != "" {
-				fmt.Fprintf(file, " (%s)", result.Type)
+				proxyType := s.SanitizeString(result.Type)
+				fmt.Fprintf(file, " (%s)", proxyType)
 			}
 			fmt.Fprintf(file, "\n")
 		}

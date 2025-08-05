@@ -1,0 +1,109 @@
+# ProxyHawk Configuration with Proxy Authentication Example
+# This example shows how to configure ProxyHawk with proxy authentication support
+
+# Basic settings
+timeout: 30
+concurrency: 50
+user_agent: "ProxyHawk-Scanner/1.0"
+
+# Proxy Authentication Settings
+auth_enabled: true                     # Enable proxy authentication support
+default_username: "your_username"      # Default username for proxies without auth in URL
+default_password: "your_password"      # Default password for proxies without auth in URL
+auth_methods:                          # Supported authentication methods
+  - "basic"                            # HTTP Basic Authentication (default)
+  - "digest"                           # HTTP Digest Authentication (future support)
+
+# Multiple authentication scenarios supported:
+# 1. URL-based auth: http://user:pass@proxy.com:8080
+# 2. Default credentials: Used when proxy URL has no auth info
+# 3. Mixed: Some proxies with URL auth, others use defaults
+
+# Test configuration
+test_urls:
+  default_url: "https://api.ipify.org?format=json"
+  test_urls:
+    - url: "https://httpbin.org/ip"
+      expect_text: '"origin"'
+    - url: "https://icanhazip.com"
+      expect_text: "."
+
+# Rate limiting (works with authenticated proxies)
+rate_limit_enabled: true
+rate_limit_delay: 200ms                # Slightly higher delay for authenticated proxies
+rate_limit_per_proxy: true             # Per-proxy rate limiting for better granularity
+
+# Retry mechanism (helpful with authentication failures)
+retry_enabled: true
+max_retries: 3
+initial_retry_delay: 2s                # Higher initial delay for auth failures
+max_retry_delay: 60s
+backoff_factor: 2.0
+retryable_errors:
+  - "connection refused"
+  - "connection timed out"
+  - "407"                              # Proxy Authentication Required
+  - "proxy authentication required"
+  - "unauthorized"
+  - "authentication failed"
+
+# Connection pool (optimized for authenticated proxies)
+connection_pool:
+  max_idle_conns: 100
+  max_idle_conns_per_host: 10
+  max_conns_per_host: 50
+  idle_conn_timeout: 120s
+  keep_alive_timeout: 45s
+  tls_handshake_timeout: 15s
+
+# Validation settings
+validation:
+  min_response_bytes: 10
+  disallowed_keywords:
+    - "Access Denied"
+    - "Proxy Error"
+    - "Authentication Required"
+    - "407 Proxy Authentication Required"
+    - "Unauthorized"
+
+# Advanced checks (may require authentication)
+advanced_checks:
+  test_protocol_smuggling: true
+  test_dns_rebinding: true
+  test_ipv6: true
+  test_host_header_injection: true
+  test_ssrf: true
+  test_http_methods:
+    - "GET"
+    - "POST"
+    - "HEAD"
+
+# Metrics to monitor authentication success/failure
+metrics:
+  enabled: true
+  listen_addr: ":9090"
+  path: "/metrics"
+
+# Cloud provider detection
+enable_cloud_checks: true
+cloud_providers:
+  - name: "AWS"
+    metadata_ips:
+      - "169.254.169.254"
+  - name: "GCP" 
+    metadata_ips:
+      - "169.254.169.254"
+      - "metadata.google.internal"
+
+# Default headers (sent with all requests)
+default_headers:
+  Accept: "application/json,text/html;q=0.9,*/*;q=0.8"
+  Accept-Language: "en-US,en;q=0.9"
+  Cache-Control: "no-cache"
+  # Note: Proxy-Authorization headers are automatically added when needed
+
+# Example proxy list formats supported:
+# 1. With embedded auth:    http://username:password@proxy.com:8080
+# 2. Without auth:          http://proxy.com:8080 (uses default credentials)
+# 3. SOCKS with auth:       socks5://user:pass@proxy.com:1080
+# 4. Mixed formats:         Can have both authenticated and non-authenticated proxies

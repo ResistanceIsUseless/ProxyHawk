@@ -15,11 +15,19 @@ import (
 
 // NewChecker creates a new proxy checker
 func NewChecker(config Config, debug bool) *Checker {
-	return &Checker{
+	checker := &Checker{
 		config:      config,
 		debug:       debug,
 		rateLimiter: make(map[string]time.Time),
 	}
+
+	// Validate and normalize retry configuration
+	checker.validateRetryConfig()
+
+	// Validate and normalize authentication configuration
+	checker.validateAuthConfig()
+
+	return checker
 }
 
 // Check validates a proxy and returns detailed information about its functionality
@@ -495,8 +503,6 @@ func (c *Checker) determineProxyType(proxyURL *url.URL, result *ProxyResult) (Pr
 	return ProxyTypeUnknown, nil, fmt.Errorf("could not determine proxy type: %s", lastError)
 }
 
-
-
 // performChecks runs all configured checks for the proxy
 func (c *Checker) performChecks(client *http.Client, result *ProxyResult) error {
 	start := time.Now()
@@ -505,8 +511,8 @@ func (c *Checker) performChecks(client *http.Client, result *ProxyResult) error 
 		result.DebugInfo += fmt.Sprintf("[VALIDATE] Running validation checks\n")
 	}
 
-	// Make the request to the validation URL
-	resp, err := c.makeRequest(client, c.config.ValidationURL, result)
+	// Make the request to the validation URL (with retry logic if enabled)
+	resp, err := c.makeRequestWithRetry(client, c.config.ValidationURL, result)
 	if err != nil {
 		if c.debug {
 			result.DebugInfo += fmt.Sprintf("[VALIDATE] Request failed: %v\n", err)
@@ -717,7 +723,6 @@ func lookupRDNS(ip string) (string, error) {
 	// Remove trailing dot from PTR record
 	return strings.TrimSuffix(names[0], "."), nil
 }
-
 
 func (c *Checker) makeRequest(client *http.Client, urlStr string, result *ProxyResult) (*http.Response, error) {
 	// Create a context with the configured timeout

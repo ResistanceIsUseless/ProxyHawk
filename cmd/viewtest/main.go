@@ -6,8 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ResistanceIsUseless/ProxyHawk/internal/ui"
 	"github.com/charmbracelet/bubbles/progress"
+
+	"github.com/ResistanceIsUseless/ProxyHawk/internal/ui"
 )
 
 func main() {
@@ -68,9 +69,9 @@ func createMockView() *ui.View {
 
 	// Create the view with mock data
 	view := &ui.View{
-		Progress:  p,
-		Total:     30,
-		Current:   10,
+		Progress: p,
+		Total:    30,
+		Current:  10,
 		Metrics: ui.ViewMetrics{
 			ActiveJobs:  5,
 			QueueSize:   15,

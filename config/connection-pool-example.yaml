@@ -1,0 +1,92 @@
+# ProxyHawk Configuration with Connection Pooling Example
+# This example shows how to configure ProxyHawk with optimized connection pooling
+
+# Basic settings
+timeout: 30
+concurrency: 50
+user_agent: "ProxyHawk-Scanner/1.0"
+
+# Connection pool configuration
+connection_pool:
+  # Maximum number of idle connections across all hosts
+  max_idle_conns: 200
+  
+  # Maximum number of idle connections per host
+  max_idle_conns_per_host: 20
+  
+  # Maximum number of concurrent connections per host
+  max_conns_per_host: 100
+  
+  # How long idle connections are kept open
+  idle_conn_timeout: 120s
+  
+  # TCP keep-alive interval
+  keep_alive_timeout: 45s
+  
+  # TLS handshake timeout
+  tls_handshake_timeout: 15s
+  
+  # Expect: 100-continue timeout
+  expect_continue_timeout: 2s
+  
+  # Whether to disable HTTP keep-alive
+  disable_keep_alives: false
+  
+  # Whether to disable compression
+  disable_compression: false
+
+# Test configuration optimized for high throughput
+test_urls:
+  default_url: "https://api.ipify.org?format=json"
+  test_urls:
+    - url: "https://httpbin.org/ip"
+      expect_text: '"origin"'
+    - url: "https://icanhazip.com"
+      expect_text: "."
+
+# Rate limiting configured for connection pooling
+rate_limit_enabled: true
+rate_limit_delay: 100ms  # Very low delay due to connection reuse
+rate_limit_per_proxy: true
+
+# Metrics to monitor connection pool performance
+metrics:
+  enabled: true
+  listen_addr: ":9090"
+  path: "/metrics"
+
+# Validation settings
+validation:
+  min_response_bytes: 10
+  disallowed_keywords:
+    - "Access Denied"
+    - "Proxy Error"
+
+# Advanced checks with connection pooling benefit
+advanced_checks:
+  test_protocol_smuggling: true
+  test_dns_rebinding: true
+  test_ipv6: true
+  test_host_header_injection: true
+  test_ssrf: true
+  test_http_methods:
+    - "GET"
+    - "POST"
+    - "HEAD"
+
+# Cloud provider detection
+enable_cloud_checks: true
+cloud_providers:
+  - name: "AWS"
+    metadata_ips:
+      - "169.254.169.254"
+  - name: "GCP" 
+    metadata_ips:
+      - "169.254.169.254"
+      - "metadata.google.internal"
+
+# Default headers
+default_headers:
+  Accept: "application/json,text/html;q=0.9,*/*;q=0.8"
+  Accept-Language: "en-US,en;q=0.9"
+  Cache-Control: "no-cache"

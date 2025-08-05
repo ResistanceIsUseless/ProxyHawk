@@ -1,0 +1,75 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Documentation
+README.md
+REGIONAL_TESTING.md
+todo.md
+CLAUDE.md
+
+# Development files
+*.md
+.vscode
+.idea
+*.log
+
+# Build artifacts (exclude the binary we're building)
+proxyhawk
+*.exe
+*.so
+*.dylib
+*.test
+
+# Test files
+*_test.go
+test-*
+tests/
+
+# Temporary files
+*.tmp
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Output directories
+output/
+*.txt
+*.json
+
+# Node modules (if any)
+node_modules/
+
+# Python files (if any)
+*.pyc
+__pycache__/
+
+# Coverage reports
+coverage.out
+*.cover
+
+# Vendor directory (if using go mod vendor)
+vendor/
+
+# IDE files
+*.swp
+*.swo
+
+# Local environment files
+.env
+.env.local
+.env.*.local
+
+# Docker files (don't include in build context)
+docker-compose*.yml
+Dockerfile*

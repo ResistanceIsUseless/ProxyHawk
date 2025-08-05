@@ -10,42 +10,55 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ResistanceIsUseless/ProxyHawk/internal/config"
-	"github.com/ResistanceIsUseless/ProxyHawk/internal/errors"
-	"github.com/ResistanceIsUseless/ProxyHawk/internal/loader"
-	"github.com/ResistanceIsUseless/ProxyHawk/internal/logging"
-	"github.com/ResistanceIsUseless/ProxyHawk/internal/output"
-	"github.com/ResistanceIsUseless/ProxyHawk/internal/proxy"
-	"github.com/ResistanceIsUseless/ProxyHawk/internal/ui"
 	"github.com/charmbracelet/bubbles/progress"
 	tea "github.com/charmbracelet/bubbletea"
-)
 
+	"github.com/ResistanceIsUseless/ProxyHawk/internal/config"
+	"github.com/ResistanceIsUseless/ProxyHawk/internal/errors"
+	"github.com/ResistanceIsUseless/ProxyHawk/internal/help"
+	"github.com/ResistanceIsUseless/ProxyHawk/internal/loader"
+	"github.com/ResistanceIsUseless/ProxyHawk/internal/logging"
+	"github.com/ResistanceIsUseless/ProxyHawk/internal/metrics"
+	"github.com/ResistanceIsUseless/ProxyHawk/internal/output"
+	"github.com/ResistanceIsUseless/ProxyHawk/internal/pool"
+	progresspkg "github.com/ResistanceIsUseless/ProxyHawk/internal/progress"
+	"github.com/ResistanceIsUseless/ProxyHawk/internal/proxy"
+	"github.com/ResistanceIsUseless/ProxyHawk/internal/ui"
+)
 
 // AppState represents the application state
 type AppState struct {
-	view          *ui.View
-	checker       *proxy.Checker
-	proxies       []string
-	results       []*proxy.ProxyResult
-	concurrency   int
-	verbose       bool
-	debug         bool
-	logger        *logging.Logger
-	mutex         sync.Mutex   // Mutex to protect shared state
-	updateChan    chan tea.Msg // Channel for sending updates to the UI
-	
+	view        *ui.View
+	checker     *proxy.Checker
+	proxies     []string
+	results     []*proxy.ProxyResult
+	concurrency int
+	verbose     bool
+	debug       bool
+	logger      *logging.Logger
+	mutex       sync.Mutex   // Mutex to protect shared state
+	updateChan  chan tea.Msg // Channel for sending updates to the UI
+
 	// Graceful shutdown support
-	ctx           context.Context
-	cancel        context.CancelFunc
-	shutdownChan  chan os.Signal
-	
+	ctx          context.Context
+	cancel       context.CancelFunc
+	shutdownChan chan os.Signal
+
 	// Output options
 	outputFile    string
 	jsonFile      string
 	workingFile   string
 	anonymousFile string
 	noUI          bool
+
+	// Progress indicator for non-TUI mode
+	progressIndicator progresspkg.ProgressIndicator
+
+	// Metrics collection
+	metricsCollector *metrics.Collector
+
+	// Config watcher for hot-reloading
+	configWatcher *config.ConfigWatcher
 }
 
 // Define custom message types
@@ -61,11 +74,13 @@ func main() {
 	concurrency := flag.Int("c", 0, "Number of concurrent checks (overrides config)")
 	useRDNS := flag.Bool("r", false, "Use rDNS lookup for host headers")
 	timeout := flag.Int("t", 0, "Timeout in seconds (overrides config)")
+	hotReload := flag.Bool("hot-reload", false, "Enable configuration hot-reloading")
 
 	// Rate limiting flags
 	rateLimitEnabled := flag.Bool("rate-limit", false, "Enable rate limiting")
 	rateLimitDelay := flag.Duration("rate-delay", 1*time.Second, "Delay between requests (e.g. 500ms, 1s, 2s)")
 	rateLimitPerHost := flag.Bool("rate-per-host", true, "Apply rate limiting per host instead of globally")
+	rateLimitPerProxy := flag.Bool("rate-per-proxy", false, "Apply rate limiting per individual proxy (takes precedence over per-host)")
 
 	// Output flags
 	outputFile := flag.String("o", "", "Output results to text file")
@@ -74,7 +89,53 @@ func main() {
 	anonymousFile := flag.String("wpa", "", "Output working anonymous proxies to file")
 	noUI := flag.Bool("no-ui", false, "Disable terminal UI (for automation/scripting)")
 
+	// Progress indicator flags
+	progressType := flag.String("progress", "bar", "Progress indicator type for non-TUI mode (none, basic, bar, spinner, dots, percent)")
+	progressWidth := flag.Int("progress-width", 50, "Width of progress bar")
+	progressNoColor := flag.Bool("progress-no-color", false, "Disable colored progress output")
+
+	// Metrics flags
+	enableMetrics := flag.Bool("metrics", false, "Enable Prometheus metrics endpoint")
+	metricsAddr := flag.String("metrics-addr", ":9090", "Address to serve metrics on")
+	metricsPath := flag.String("metrics-path", "/metrics", "Path for metrics endpoint")
+
+	// Help and version flags
+	showHelp := flag.Bool("help", false, "Show help message")
+	showHelpShort := flag.Bool("h", false, "Show help message (short)")
+	showVersion := flag.Bool("version", false, "Show version information")
+	showQuickStart := flag.Bool("quickstart", false, "Show quick start guide")
+
+	// Custom usage function
+	flag.Usage = func() {
+		noColor := help.DetectNoColor()
+		help.PrintHelp(os.Stderr, noColor)
+	}
+
 	flag.Parse()
+
+	// Handle help and version flags before anything else
+	noColor := help.DetectNoColor()
+
+	if *showHelp || *showHelpShort {
+		help.PrintHelp(os.Stdout, noColor)
+		os.Exit(0)
+	}
+
+	if *showVersion {
+		help.PrintVersion(os.Stdout, noColor)
+		os.Exit(0)
+	}
+
+	if *showQuickStart {
+		help.PrintQuickStart(os.Stdout, noColor)
+		os.Exit(0)
+	}
+
+	// Validate required flags
+	if *proxyList == "" {
+		help.PrintUsageError(os.Stderr, fmt.Errorf("proxy list file is required"), noColor)
+		os.Exit(1)
+	}
 
 	// Initialize logger based on debug/verbose flags
 	logLevel := logging.LevelInfo
@@ -87,25 +148,25 @@ func main() {
 	})
 
 	// Load and validate configuration
-	config, validationResult, err := config.ValidateAndLoad(*configFile)
+	cfg, validationResult, err := config.ValidateAndLoad(*configFile)
 	if err != nil {
 		// Enhanced error logging with error categorization
 		category := errors.GetErrorCategory(err)
-		logger.Error("Failed to load configuration", 
-			"error", err, 
-			"file", *configFile, 
+		logger.Error("Failed to load configuration",
+			"error", err,
+			"file", *configFile,
 			"category", category,
 			"critical", errors.IsCritical(err))
 		os.Exit(1)
 	}
-	
+
 	// Log validation warnings if any
 	if len(validationResult.Warnings) > 0 {
 		for _, warning := range validationResult.Warnings {
 			logger.Warn("Configuration validation warning", "warning", warning)
 		}
 	}
-	
+
 	// Check for validation errors
 	if !validationResult.Valid {
 		logger.Error("Configuration validation failed", "errors", len(validationResult.Errors))
@@ -114,15 +175,56 @@ func main() {
 		}
 		os.Exit(1)
 	}
-	
+
 	logger.ConfigLoaded(*configFile)
+
+	// Set up config hot-reloading if enabled
+	var configWatcher *config.ConfigWatcher
+	if *hotReload {
+		watcherConfig := config.WatcherConfig{
+			DebounceDelay:        1 * time.Second,
+			ValidateBeforeReload: true,
+			OnReload: func(newConfig *config.Config, result *config.ValidationResult) {
+				logger.Info("Configuration reloaded successfully", "file", *configFile)
+
+				// Log any warnings
+				for _, warning := range result.Warnings {
+					logger.Warn("Configuration warning after reload", "warning", warning)
+				}
+
+				// Note: We don't update the running configuration here because
+				// that would require stopping and restarting workers, which is complex.
+				// For now, hot-reload will take effect on the next run.
+				logger.Info("Configuration changes will take effect on next proxy check run")
+			},
+			OnError: func(err error) {
+				logger.Error("Configuration reload failed", "error", err)
+			},
+		}
+
+		var err error
+		configWatcher, err = config.NewConfigWatcher(*configFile, watcherConfig)
+		if err != nil {
+			logger.Warn("Failed to enable configuration hot-reloading", "error", err)
+			// Continue without hot-reload
+		} else {
+			logger.Info("Configuration hot-reloading enabled", "file", *configFile)
+		}
+	}
 
 	// Override config with command line flags if specified
 	if *concurrency > 0 {
-		config.Concurrency = *concurrency
+		cfg.Concurrency = *concurrency
 	}
 	if *timeout > 0 {
-		config.Timeout = *timeout
+		cfg.Timeout = *timeout
+	}
+
+	// Override metrics config with CLI flags
+	if *enableMetrics {
+		cfg.Metrics.Enabled = true
+		cfg.Metrics.ListenAddr = *metricsAddr
+		cfg.Metrics.Path = *metricsPath
 	}
 
 	// Load proxies
@@ -130,9 +232,9 @@ func main() {
 	if err != nil {
 		// Enhanced error logging with error categorization
 		category := errors.GetErrorCategory(err)
-		logger.Error("Failed to load proxies", 
-			"error", err, 
-			"file", *proxyList, 
+		logger.Error("Failed to load proxies",
+			"error", err,
+			"file", *proxyList,
 			"category", category,
 			"retryable", errors.IsRetryable(err))
 		os.Exit(1)
@@ -151,29 +253,77 @@ func main() {
 		logger.Warn("Proxy loading warning", "warning", warning)
 	}
 
+	// Initialize metrics collector
+	var metricsCollector *metrics.Collector
+	if cfg.Metrics.Enabled {
+		metricsCollector = metrics.NewCollector()
+		if err := metricsCollector.StartServer(cfg.Metrics.ListenAddr); err != nil {
+			logger.Warn("Failed to start metrics server", "error", err, "addr", cfg.Metrics.ListenAddr)
+		} else {
+			logger.Info("Metrics server started", "addr", cfg.Metrics.ListenAddr, "path", cfg.Metrics.Path)
+		}
+	}
+
+	// Create connection pool
+	poolConfig := pool.Config{
+		MaxIdleConns:          cfg.ConnectionPool.MaxIdleConns,
+		MaxIdleConnsPerHost:   cfg.ConnectionPool.MaxIdleConnsPerHost,
+		MaxConnsPerHost:       cfg.ConnectionPool.MaxConnsPerHost,
+		IdleConnTimeout:       cfg.ConnectionPool.IdleConnTimeout,
+		KeepAliveTimeout:      cfg.ConnectionPool.KeepAliveTimeout,
+		TLSHandshakeTimeout:   cfg.ConnectionPool.TLSHandshakeTimeout,
+		ExpectContinueTimeout: cfg.ConnectionPool.ExpectContinueTimeout,
+		DisableKeepAlives:     cfg.ConnectionPool.DisableKeepAlives,
+		DisableCompression:    cfg.ConnectionPool.DisableCompression,
+		InsecureSkipVerify:    cfg.InsecureSkipVerify,
+	}
+	connectionPool := pool.NewConnectionPool(poolConfig)
+	logger.Info("Connection pool initialized",
+		"max_idle_conns", poolConfig.MaxIdleConns,
+		"max_idle_conns_per_host", poolConfig.MaxIdleConnsPerHost,
+		"max_conns_per_host", poolConfig.MaxConnsPerHost)
+
 	// Create proxy checker
 	checker := proxy.NewChecker(proxy.Config{
-		Timeout:             time.Duration(config.Timeout) * time.Second,
-		ValidationURL:       config.TestURLs.DefaultURL,
-		DisallowedKeywords:  config.Validation.DisallowedKeywords,
-		MinResponseBytes:    config.Validation.MinResponseBytes,
-		DefaultHeaders:      config.DefaultHeaders,
-		UserAgent:           config.UserAgent,
-		EnableCloudChecks:   config.EnableCloudChecks,
-		CloudProviders:      config.CloudProviders,
-		RequireStatusCode:   config.RequireStatusCode,
-		RequireContentMatch: config.RequireContentMatch,
-		RequireHeaderFields: config.RequireHeaderFields,
-		AdvancedChecks:      config.AdvancedChecks,
+		Timeout:             time.Duration(cfg.Timeout) * time.Second,
+		ValidationURL:       cfg.TestURLs.DefaultURL,
+		DisallowedKeywords:  cfg.Validation.DisallowedKeywords,
+		MinResponseBytes:    cfg.Validation.MinResponseBytes,
+		DefaultHeaders:      cfg.DefaultHeaders,
+		UserAgent:           cfg.UserAgent,
+		EnableCloudChecks:   cfg.EnableCloudChecks,
+		CloudProviders:      cfg.CloudProviders,
+		RequireStatusCode:   cfg.RequireStatusCode,
+		RequireContentMatch: cfg.RequireContentMatch,
+		RequireHeaderFields: cfg.RequireHeaderFields,
+		AdvancedChecks:      cfg.AdvancedChecks,
 		UseRDNS:             *useRDNS,
-		InteractshURL:       config.InteractshURL,
-		InteractshToken:     config.InteractshToken,
+		InteractshURL:       cfg.InteractshURL,
+		InteractshToken:     cfg.InteractshToken,
 
 		// Rate limiting settings
-		RateLimitEnabled: *rateLimitEnabled,
-		RateLimitDelay:   *rateLimitDelay,
-		RateLimitPerHost: *rateLimitPerHost,
-	}, *debug || config.AdvancedChecks.TestProtocolSmuggling || config.AdvancedChecks.TestDNSRebinding)
+		RateLimitEnabled:  *rateLimitEnabled,
+		RateLimitDelay:    *rateLimitDelay,
+		RateLimitPerHost:  *rateLimitPerHost,
+		RateLimitPerProxy: *rateLimitPerProxy,
+
+		// Retry settings
+		RetryEnabled:    cfg.RetryEnabled,
+		MaxRetries:      cfg.MaxRetries,
+		InitialDelay:    cfg.InitialRetryDelay,
+		MaxDelay:        cfg.MaxRetryDelay,
+		BackoffFactor:   cfg.BackoffFactor,
+		RetryableErrors: cfg.RetryableErrors,
+
+		// Authentication settings
+		AuthEnabled:     cfg.AuthEnabled,
+		DefaultUsername: cfg.DefaultUsername,
+		DefaultPassword: cfg.DefaultPassword,
+		AuthMethods:     cfg.AuthMethods,
+
+		// Connection pool
+		ConnectionPool: connectionPool,
+	}, *debug || cfg.AdvancedChecks.TestProtocolSmuggling || cfg.AdvancedChecks.TestDNSRebinding)
 
 	// Initialize UI
 	p := progress.New(
@@ -183,11 +333,11 @@ func main() {
 	)
 
 	view := &ui.View{
-		Progress:     p,
-		Total:        len(proxies),
+		Progress: p,
+		Total:    len(proxies),
 		DisplayMode: ui.ViewDisplayMode{
-			IsVerbose: *verbose,                                                                                        // Only use verbose flag
-			IsDebug:   *debug || config.AdvancedChecks.TestProtocolSmuggling || config.AdvancedChecks.TestDNSRebinding, // Use debug mode if flag or advanced checks are enabled
+			IsVerbose: *verbose,                                                                                  // Only use verbose flag
+			IsDebug:   *debug || cfg.AdvancedChecks.TestProtocolSmuggling || cfg.AdvancedChecks.TestDNSRebinding, // Use debug mode if flag or advanced checks are enabled
 		},
 		ActiveChecks: make(map[string]*ui.CheckStatus),
 	}
@@ -197,24 +347,40 @@ func main() {
 	shutdownChan := make(chan os.Signal, 1)
 	signal.Notify(shutdownChan, syscall.SIGINT, syscall.SIGTERM)
 
+	// Create progress indicator for non-TUI mode
+	var progressIndicator progresspkg.ProgressIndicator
+	if *noUI {
+		progressConfig := progresspkg.Config{
+			Type:      progresspkg.ProgressType(*progressType),
+			Width:     *progressWidth,
+			NoColor:   *progressNoColor,
+			ShowETA:   true,
+			ShowStats: true,
+		}
+		progressIndicator = progresspkg.NewProgressIndicator(progressConfig)
+	}
+
 	// Create application state
 	state := &AppState{
-		view:          view,
-		checker:       checker,
-		proxies:       proxies,
-		concurrency:   config.Concurrency,
-		verbose:       *verbose, // Only use verbose flag
-		debug:         *debug || config.AdvancedChecks.TestProtocolSmuggling || config.AdvancedChecks.TestDNSRebinding,
-		logger:        logger,
-		updateChan:    make(chan tea.Msg, 100), // Buffer for update messages
-		ctx:           ctx,
-		cancel:        cancel,
-		shutdownChan:  shutdownChan,
-		outputFile:    *outputFile,
-		jsonFile:      *jsonFile,
-		workingFile:   *workingFile,
-		anonymousFile: *anonymousFile,
-		noUI:          *noUI,
+		view:              view,
+		checker:           checker,
+		proxies:           proxies,
+		concurrency:       cfg.Concurrency,
+		verbose:           *verbose, // Only use verbose flag
+		debug:             *debug || cfg.AdvancedChecks.TestProtocolSmuggling || cfg.AdvancedChecks.TestDNSRebinding,
+		logger:            logger,
+		updateChan:        make(chan tea.Msg, 100), // Buffer for update messages
+		ctx:               ctx,
+		cancel:            cancel,
+		shutdownChan:      shutdownChan,
+		outputFile:        *outputFile,
+		jsonFile:          *jsonFile,
+		workingFile:       *workingFile,
+		anonymousFile:     *anonymousFile,
+		noUI:              *noUI,
+		progressIndicator: progressIndicator,
+		metricsCollector:  metricsCollector,
+		configWatcher:     configWatcher,
 	}
 
 	// Start shutdown handler goroutine
@@ -222,13 +388,35 @@ func main() {
 		<-shutdownChan
 		logger.ShutdownReceived()
 		cancel() // Cancel the context to signal all goroutines to stop
-		
+
 		// Give goroutines time to clean up
 		time.Sleep(2 * time.Second)
-		
+
 		// Process any remaining results
 		processResults(state)
-		
+
+		// Stop config watcher
+		if state.configWatcher != nil {
+			if err := state.configWatcher.Stop(); err != nil {
+				logger.Warn("Error stopping config watcher", "error", err)
+			} else {
+				logger.Info("Config watcher stopped")
+			}
+		}
+
+		// Stop metrics server
+		if state.metricsCollector != nil {
+			if err := state.metricsCollector.StopServer(); err != nil {
+				logger.Warn("Error stopping metrics server", "error", err)
+			} else {
+				logger.Info("Metrics server stopped")
+			}
+		}
+
+		// Clean up connection pool
+		connectionPool.CloseIdleConnections()
+		logger.Info("Connection pool cleaned up")
+
 		logger.ShutdownComplete()
 		os.Exit(0)
 	}()
@@ -257,7 +445,6 @@ func main() {
 	// Process results
 	processResults(state)
 }
-
 
 func processResults(state *AppState) {
 	// Generate summary
@@ -354,6 +541,13 @@ func (s *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if speedCount > 0 {
 			s.view.Metrics.AvgSpeed = totalSpeed / time.Duration(speedCount)
+		}
+
+		// Update metrics if enabled
+		if s.metricsCollector != nil {
+			s.metricsCollector.SetActiveChecks(s.view.Metrics.ActiveJobs)
+			s.metricsCollector.SetQueueSize(s.view.Metrics.QueueSize)
+			s.metricsCollector.SetWorkersActive(s.concurrency) // This could be made more dynamic
 		}
 
 		s.mutex.Unlock()
@@ -475,6 +669,20 @@ func (s *AppState) startChecking() {
 				}
 
 				result := s.checker.Check(proxy)
+
+				// Record metrics if enabled
+				if s.metricsCollector != nil {
+					s.metricsCollector.RecordProxyCheck(result.Working, string(result.Type), result.Speed)
+					if result.IsAnonymous {
+						s.metricsCollector.RecordAnonymousProxy()
+					}
+					if result.CloudProvider != "" {
+						s.metricsCollector.RecordCloudProvider(result.CloudProvider)
+					}
+					if result.Error != nil {
+						s.metricsCollector.RecordError("proxy_check_failed")
+					}
+				}
 
 				// Update queue size after each check is no longer needed here as it will be updated in processResult
 				// or when marking a job as inactive
@@ -705,6 +913,11 @@ func (s *AppState) startCheckingNoUI() {
 
 	s.logger.Info("Starting proxy tests", "total", len(s.proxies), "concurrency", s.concurrency)
 
+	// Start progress indicator if available
+	if s.progressIndicator != nil {
+		s.progressIndicator.Start(len(s.proxies))
+	}
+
 	// Start workers
 	for i := 0; i < s.concurrency; i++ {
 		wg.Add(1)
@@ -728,11 +941,40 @@ func (s *AppState) startCheckingNoUI() {
 				}
 
 				result := s.checker.Check(proxy)
-				
+
+				// Record metrics if enabled
+				if s.metricsCollector != nil {
+					s.metricsCollector.RecordProxyCheck(result.Working, string(result.Type), result.Speed)
+					if result.IsAnonymous {
+						s.metricsCollector.RecordAnonymousProxy()
+					}
+					if result.CloudProvider != "" {
+						s.metricsCollector.RecordCloudProvider(result.CloudProvider)
+					}
+					if result.Error != nil {
+						s.metricsCollector.RecordError("proxy_check_failed")
+					}
+				}
+
 				s.mutex.Lock()
 				s.results = append(s.results, result)
 				current := len(s.results)
 				s.mutex.Unlock()
+
+				// Update progress indicator
+				if s.progressIndicator != nil {
+					var message string
+					if result.Working {
+						if result.IsAnonymous {
+							message = "working anonymous proxy"
+						} else {
+							message = "working proxy"
+						}
+					} else {
+						message = "failed proxy check"
+					}
+					s.progressIndicator.Update(current, message)
+				}
 
 				if result.Working {
 					s.logger.WithContext("progress", fmt.Sprintf("%d/%d", current, len(s.proxies))).ProxySuccess(proxy, result.Speed.Seconds(), result.IsAnonymous, result.CloudProvider)
@@ -760,6 +1002,11 @@ func (s *AppState) startCheckingNoUI() {
 
 	// Wait for all workers to finish
 	wg.Wait()
-	
+
+	// Finish progress indicator
+	if s.progressIndicator != nil {
+		s.progressIndicator.Finish("Proxy checking completed")
+	}
+
 	s.logger.ProxyCheckComplete()
 }

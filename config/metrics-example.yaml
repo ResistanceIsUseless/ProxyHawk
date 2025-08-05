@@ -1,0 +1,79 @@
+# ProxyHawk Configuration with Metrics Example
+# This example shows how to configure ProxyHawk with Prometheus metrics enabled
+
+# Basic settings
+timeout: 30
+concurrency: 20
+user_agent: "ProxyHawk-Scanner/1.0"
+
+# Test configuration
+test_urls:
+  default_url: "https://api.ipify.org?format=json"
+  test_urls:
+    - url: "https://httpbin.org/ip"
+      expect_text: '"origin"'
+
+# Rate limiting
+rate_limit_enabled: true
+rate_limit_delay: 2s
+rate_limit_per_host: false
+rate_limit_per_proxy: true  # Enable per-proxy rate limiting
+
+# Metrics configuration (Prometheus compatible)
+metrics:
+  enabled: true
+  listen_addr: ":9090"
+  path: "/metrics"
+
+# Validation settings
+validation:
+  min_response_bytes: 50
+  disallowed_keywords:
+    - "Access Denied"
+    - "Proxy Error"
+    - "Bad Gateway"
+
+# Advanced security checks
+advanced_checks:
+  test_protocol_smuggling: true
+  test_dns_rebinding: true
+  test_ipv6: true
+  test_host_header_injection: true
+  test_ssrf: true
+  test_cache_poisoning: true
+  test_http_methods:
+    - "GET"
+    - "POST"
+    - "HEAD"
+
+# Cloud provider detection
+enable_cloud_checks: true
+cloud_providers:
+  - name: "AWS"
+    metadata_ips:
+      - "169.254.169.254"
+    asns:
+      - "AS16509"
+  - name: "GCP"
+    metadata_ips:
+      - "169.254.169.254"
+      - "metadata.google.internal"
+    asns:
+      - "AS15169"
+  - name: "Azure"
+    metadata_ips:
+      - "169.254.169.254"
+    asns:
+      - "AS8075"
+
+# Response requirements
+require_status_code: 200
+require_header_fields:
+  - "content-type"
+
+# Default headers
+default_headers:
+  Accept: "application/json,text/html;q=0.9,*/*;q=0.8"
+  Accept-Language: "en-US,en;q=0.9"
+  Accept-Encoding: "gzip, deflate"
+  Cache-Control: "no-cache"

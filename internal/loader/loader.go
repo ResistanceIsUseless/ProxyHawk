@@ -32,11 +32,11 @@ func LoadProxiesWithValidator(filename string, validator *validation.ProxyValida
 	var warnings []string
 	lineCount := 0
 	scanner := bufio.NewScanner(file)
-	
+
 	for scanner.Scan() {
 		lineCount++
 		line := strings.TrimSpace(scanner.Text())
-		
+
 		// Skip empty lines and comments
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue

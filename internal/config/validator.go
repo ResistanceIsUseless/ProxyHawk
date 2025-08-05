@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 )
 
 // ValidationResult represents the result of configuration validation
@@ -68,6 +69,13 @@ func ValidateConfig(config *Config) *ValidationResult {
 		} else if config.RateLimitDelay == 0 {
 			result.Warnings = append(result.Warnings, "rate limiting is enabled but delay is 0, this will have no effect")
 		}
+		
+		// Validate rate limiting mode
+		if config.RateLimitPerHost && config.RateLimitPerProxy {
+			result.Warnings = append(result.Warnings, "both per-host and per-proxy rate limiting enabled, per-proxy will take precedence")
+		} else if !config.RateLimitPerHost && !config.RateLimitPerProxy {
+			result.Warnings = append(result.Warnings, "rate limiting enabled but no mode specified, defaulting to global rate limiting")
+		}
 	}
 
 	// Validate URLs
@@ -87,6 +95,15 @@ func ValidateConfig(config *Config) *ValidationResult {
 
 	// Validate response requirements
 	validateResponseRequirements(config, result)
+
+	// Validate metrics settings
+	validateMetricsSettings(config, result)
+
+	// Validate connection pool settings
+	validateConnectionPoolSettings(config, result)
+
+	// Validate retry settings
+	validateRetrySettings(config, result)
 
 	return result
 }
@@ -329,4 +346,241 @@ func ValidateAndLoad(filename string) (*Config, *ValidationResult, error) {
 
 	validationResult := ValidateConfig(config)
 	return config, validationResult, nil
+}
+
+// validateMetricsSettings validates metrics configuration
+func validateMetricsSettings(config *Config, result *ValidationResult) {
+	if !config.Metrics.Enabled {
+		return
+	}
+
+	// Validate listen address format
+	if strings.TrimSpace(config.Metrics.ListenAddr) == "" {
+		result.Valid = false
+		result.Errors = append(result.Errors, ConfigValidationError{
+			Field:   "metrics.listen_addr",
+			Value:   config.Metrics.ListenAddr,
+			Message: "metrics listen address cannot be empty when metrics are enabled",
+		})
+	} else {
+		// Basic validation for address format
+		addr := config.Metrics.ListenAddr
+		if !strings.Contains(addr, ":") {
+			result.Warnings = append(result.Warnings, 
+				fmt.Sprintf("metrics listen address '%s' should include port (e.g., ':9090' or 'localhost:9090')", addr))
+		}
+	}
+
+	// Validate metrics path
+	if strings.TrimSpace(config.Metrics.Path) == "" {
+		result.Valid = false
+		result.Errors = append(result.Errors, ConfigValidationError{
+			Field:   "metrics.path",
+			Value:   config.Metrics.Path,
+			Message: "metrics path cannot be empty when metrics are enabled",
+		})
+	} else if !strings.HasPrefix(config.Metrics.Path, "/") {
+		result.Warnings = append(result.Warnings, 
+			fmt.Sprintf("metrics path '%s' should start with '/' for proper HTTP routing", config.Metrics.Path))
+	}
+}
+
+// validateConnectionPoolSettings validates connection pool configuration
+func validateConnectionPoolSettings(config *Config, result *ValidationResult) {
+	cp := &config.ConnectionPool
+
+	// Validate MaxIdleConns
+	if cp.MaxIdleConns < 0 {
+		result.Valid = false
+		result.Errors = append(result.Errors, ConfigValidationError{
+			Field:   "connection_pool.max_idle_conns",
+			Value:   cp.MaxIdleConns,
+			Message: "max idle connections cannot be negative",
+		})
+	} else if cp.MaxIdleConns > 1000 {
+		result.Warnings = append(result.Warnings, 
+			fmt.Sprintf("max idle connections of %d is very high, may consume excessive memory", cp.MaxIdleConns))
+	}
+
+	// Validate MaxIdleConnsPerHost
+	if cp.MaxIdleConnsPerHost < 0 {
+		result.Valid = false
+		result.Errors = append(result.Errors, ConfigValidationError{
+			Field:   "connection_pool.max_idle_conns_per_host",
+			Value:   cp.MaxIdleConnsPerHost,
+			Message: "max idle connections per host cannot be negative",
+		})
+	} else if cp.MaxIdleConnsPerHost > cp.MaxIdleConns {
+		result.Warnings = append(result.Warnings, 
+			"max idle connections per host should not exceed max idle connections")
+	}
+
+	// Validate MaxConnsPerHost
+	if cp.MaxConnsPerHost < 0 {
+		result.Valid = false
+		result.Errors = append(result.Errors, ConfigValidationError{
+			Field:   "connection_pool.max_conns_per_host",
+			Value:   cp.MaxConnsPerHost,
+			Message: "max connections per host cannot be negative",
+		})
+	} else if cp.MaxConnsPerHost > 500 {
+		result.Warnings = append(result.Warnings, 
+			fmt.Sprintf("max connections per host of %d is very high, may overwhelm target servers", cp.MaxConnsPerHost))
+	}
+
+	// Validate timeouts
+	if cp.IdleConnTimeout < 0 {
+		result.Valid = false
+		result.Errors = append(result.Errors, ConfigValidationError{
+			Field:   "connection_pool.idle_conn_timeout",
+			Value:   cp.IdleConnTimeout,
+			Message: "idle connection timeout cannot be negative",
+		})
+	} else if cp.IdleConnTimeout > 300*time.Second {
+		result.Warnings = append(result.Warnings, 
+			fmt.Sprintf("idle connection timeout of %v is very high", cp.IdleConnTimeout))
+	}
+
+	if cp.KeepAliveTimeout < 0 {
+		result.Valid = false
+		result.Errors = append(result.Errors, ConfigValidationError{
+			Field:   "connection_pool.keep_alive_timeout",
+			Value:   cp.KeepAliveTimeout,
+			Message: "keep alive timeout cannot be negative",
+		})
+	}
+
+	if cp.TLSHandshakeTimeout < 0 {
+		result.Valid = false
+		result.Errors = append(result.Errors, ConfigValidationError{
+			Field:   "connection_pool.tls_handshake_timeout",
+			Value:   cp.TLSHandshakeTimeout,
+			Message: "TLS handshake timeout cannot be negative",
+		})
+	} else if cp.TLSHandshakeTimeout < 1*time.Second {
+		result.Warnings = append(result.Warnings, 
+			"TLS handshake timeout less than 1 second may cause connection failures")
+	}
+
+	if cp.ExpectContinueTimeout < 0 {
+		result.Valid = false
+		result.Errors = append(result.Errors, ConfigValidationError{
+			Field:   "connection_pool.expect_continue_timeout",
+			Value:   cp.ExpectContinueTimeout,
+			Message: "expect continue timeout cannot be negative",
+		})
+	}
+
+	// Check for conflicting settings
+	if cp.DisableKeepAlives && cp.KeepAliveTimeout > 0 {
+		result.Warnings = append(result.Warnings, 
+			"keep alive timeout is set but keep alives are disabled")
+	}
+}
+
+// validateRetrySettings validates retry configuration
+func validateRetrySettings(config *Config, result *ValidationResult) {
+	if !config.RetryEnabled {
+		return // No validation needed if retries are disabled
+	}
+
+	// Validate MaxRetries
+	if config.MaxRetries < 0 {
+		result.Valid = false
+		result.Errors = append(result.Errors, ConfigValidationError{
+			Field:   "max_retries",
+			Value:   config.MaxRetries,
+			Message: "max retries cannot be negative",
+		})
+	} else if config.MaxRetries == 0 {
+		result.Warnings = append(result.Warnings, 
+			"max retries is 0, which means no retries will be performed")
+	} else if config.MaxRetries > 10 {
+		result.Warnings = append(result.Warnings, 
+			"max retries is very high (>10), which may cause excessive delays")
+	}
+
+	// Validate InitialRetryDelay
+	if config.InitialRetryDelay < 0 {
+		result.Valid = false
+		result.Errors = append(result.Errors, ConfigValidationError{
+			Field:   "initial_retry_delay",
+			Value:   config.InitialRetryDelay,
+			Message: "initial retry delay cannot be negative",
+		})
+	} else if config.InitialRetryDelay == 0 {
+		result.Warnings = append(result.Warnings, 
+			"initial retry delay is 0, retries will happen immediately")
+	} else if config.InitialRetryDelay > 60*time.Second {
+		result.Warnings = append(result.Warnings, 
+			"initial retry delay is very high (>60s), which may cause long delays")
+	}
+
+	// Validate MaxRetryDelay
+	if config.MaxRetryDelay < 0 {
+		result.Valid = false
+		result.Errors = append(result.Errors, ConfigValidationError{
+			Field:   "max_retry_delay",
+			Value:   config.MaxRetryDelay,
+			Message: "max retry delay cannot be negative",
+		})
+	} else if config.MaxRetryDelay < config.InitialRetryDelay {
+		result.Valid = false
+		result.Errors = append(result.Errors, ConfigValidationError{
+			Field:   "max_retry_delay",
+			Value:   config.MaxRetryDelay,
+			Message: "max retry delay must be greater than or equal to initial retry delay",
+		})
+	} else if config.MaxRetryDelay > 5*time.Minute {
+		result.Warnings = append(result.Warnings, 
+			"max retry delay is very high (>5min), which may cause very long delays")
+	}
+
+	// Validate BackoffFactor
+	if config.BackoffFactor < 1.0 {
+		result.Valid = false
+		result.Errors = append(result.Errors, ConfigValidationError{
+			Field:   "backoff_factor",
+			Value:   config.BackoffFactor,
+			Message: "backoff factor must be at least 1.0",
+		})
+	} else if config.BackoffFactor == 1.0 {
+		result.Warnings = append(result.Warnings, 
+			"backoff factor is 1.0, delays will be constant (no exponential backoff)")
+	} else if config.BackoffFactor > 5.0 {
+		result.Warnings = append(result.Warnings, 
+			"backoff factor is very high (>5.0), which may cause delays to grow very quickly")
+	}
+
+	// Validate RetryableErrors
+	if len(config.RetryableErrors) == 0 {
+		result.Warnings = append(result.Warnings, 
+			"no retryable errors configured, default patterns will be used")
+	}
+
+	// Check for empty or very short error patterns
+	for i, pattern := range config.RetryableErrors {
+		if strings.TrimSpace(pattern) == "" {
+			result.Valid = false
+			result.Errors = append(result.Errors, ConfigValidationError{
+				Field:   fmt.Sprintf("retryable_errors[%d]", i),
+				Value:   pattern,
+				Message: "retryable error pattern cannot be empty",
+			})
+		} else if len(strings.TrimSpace(pattern)) < 3 {
+			result.Warnings = append(result.Warnings, 
+				fmt.Sprintf("retryable error pattern '%s' is very short and may match too broadly", pattern))
+		}
+	}
+
+	// Check for duplicate patterns
+	seen := make(map[string]bool)
+	for i, pattern := range config.RetryableErrors {
+		lower := strings.ToLower(strings.TrimSpace(pattern))
+		if seen[lower] {
+			result.Warnings = append(result.Warnings, 
+				fmt.Sprintf("duplicate retryable error pattern at index %d: '%s'", i, pattern))
+		}
+		seen[lower] = true
+	}
 }

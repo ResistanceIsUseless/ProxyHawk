@@ -38,6 +38,12 @@ func (c *Checker) applyRateLimit(host string, result *ProxyResult) {
 		return
 	}
 
+	// If per-proxy rate limiting is enabled, delegate to the proxy-specific function
+	if c.config.RateLimitPerProxy && result.ProxyURL != "" {
+		c.applyProxyRateLimit(result.ProxyURL, result)
+		return
+	}
+
 	c.rateLimiterLock.Lock()
 	defer c.rateLimiterLock.Unlock()
 
@@ -64,5 +70,37 @@ func (c *Checker) applyRateLimit(host string, result *ProxyResult) {
 
 	if c.debug {
 		result.DebugInfo += fmt.Sprintf("[DEBUG] Rate limiting applied for %s\n", rateLimitKey)
+	}
+}
+
+// applyProxyRateLimit applies rate limiting per individual proxy
+func (c *Checker) applyProxyRateLimit(proxyURL string, result *ProxyResult) {
+	if !c.config.RateLimitEnabled {
+		return
+	}
+
+	c.rateLimiterLock.Lock()
+	defer c.rateLimiterLock.Unlock()
+
+	// Use the full proxy URL as the rate limiting key for per-proxy limiting
+	rateLimitKey := proxyURL
+
+	// Check if we need to wait
+	if lastTime, exists := c.rateLimiter[rateLimitKey]; exists {
+		elapsed := time.Since(lastTime)
+		if elapsed < c.config.RateLimitDelay {
+			waitTime := c.config.RateLimitDelay - elapsed
+			if c.debug {
+				result.DebugInfo += fmt.Sprintf("[DEBUG] Per-proxy rate limiting: waiting %v for proxy %s\n", waitTime, proxyURL)
+			}
+			time.Sleep(waitTime)
+		}
+	}
+
+	// Update the last request time for this specific proxy
+	c.rateLimiter[rateLimitKey] = time.Now()
+
+	if c.debug {
+		result.DebugInfo += fmt.Sprintf("[DEBUG] Per-proxy rate limiting applied for %s\n", proxyURL)
 	}
 }

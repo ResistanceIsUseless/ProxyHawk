@@ -12,30 +12,30 @@ type View struct {
 	Progress progress.Model
 	Total    int
 	Current  int
-	
+
 	// Performance metrics
 	Metrics ViewMetrics
-	
+
 	// Active state
 	ActiveChecks map[string]*CheckStatus
 	SpinnerIdx   int
-	
+
 	// Display configuration
 	DisplayMode ViewDisplayMode
-	
+
 	// Layout configuration
 	Layout LayoutConfig
-	
+
 	// Debug information
 	DebugInfo string
 }
 
 // ViewMetrics contains performance and execution metrics
 type ViewMetrics struct {
-	ActiveJobs   int
-	QueueSize    int
-	SuccessRate  float64
-	AvgSpeed     time.Duration
+	ActiveJobs  int
+	QueueSize   int
+	SuccessRate float64
+	AvgSpeed    time.Duration
 }
 
 // ViewDisplayMode contains display configuration
@@ -62,10 +62,10 @@ func (v *View) UpdateLayout(termWidth, termHeight int) {
 
 // IsValid checks if the View state is valid
 func (v *View) IsValid() bool {
-	return v.Total >= 0 && 
-		   v.Current >= 0 && 
-		   v.Current <= v.Total &&
-		   v.ActiveChecks != nil
+	return v.Total >= 0 &&
+		v.Current >= 0 &&
+		v.Current <= v.Total &&
+		v.ActiveChecks != nil
 }
 
 // GetCompletionPercentage returns the completion percentage

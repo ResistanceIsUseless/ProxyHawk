@@ -11,9 +11,20 @@ import (
 // testConfig creates a minimal valid config for testing
 func testConfig() *Config {
 	return &Config{
-		Timeout: 10,
+		Timeout:     10,
 		Concurrency: 10,
-		UserAgent: "test-agent",
+		UserAgent:   "test-agent",
+		ConnectionPool: ConnectionPoolConfig{
+			MaxIdleConns:          100,
+			MaxIdleConnsPerHost:   10,
+			MaxConnsPerHost:       50,
+			IdleConnTimeout:       90 * time.Second,
+			KeepAliveTimeout:      30 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+			DisableKeepAlives:     false,
+			DisableCompression:    false,
+		},
 	}
 }
 
@@ -32,20 +43,20 @@ func TestValidateConfig(t *testing.T) {
 				cfg.Concurrency = 10 // Ensure concurrency is set
 				return cfg
 			}(),
-			expectValid: true,
+			expectValid:  true,
 			expectErrors: 0,
-			expectWarns: 1, // Warning about no security checks
+			expectWarns:  1, // Warning about no security checks
 		},
 		{
 			name: "invalid timeout",
 			config: &Config{
-				Timeout: -1,
+				Timeout:     -1,
 				Concurrency: 10,
-				UserAgent: "test-agent",
+				UserAgent:   "test-agent",
 			},
-			expectValid: false,
+			expectValid:  false,
 			expectErrors: 1,
-			expectWarns: 1, // no security checks warning
+			expectWarns:  1, // no security checks warning
 		},
 		{
 			name: "very high timeout warning",
@@ -54,9 +65,9 @@ func TestValidateConfig(t *testing.T) {
 				cfg.Timeout = 400
 				return cfg
 			}(),
-			expectValid: true,
+			expectValid:  true,
 			expectErrors: 0,
-			expectWarns: 2, // high timeout + no security checks
+			expectWarns:  2, // high timeout + no security checks
 		},
 		{
 			name: "invalid concurrency",
@@ -65,9 +76,9 @@ func TestValidateConfig(t *testing.T) {
 				cfg.Concurrency = 0
 				return cfg
 			}(),
-			expectValid: false,
+			expectValid:  false,
 			expectErrors: 1,
-			expectWarns: 1, // no security checks
+			expectWarns:  1, // no security checks
 		},
 		{
 			name: "very high concurrency warning",
@@ -76,9 +87,9 @@ func TestValidateConfig(t *testing.T) {
 				cfg.Concurrency = 150
 				return cfg
 			}(),
-			expectValid: true,
+			expectValid:  true,
 			expectErrors: 0,
-			expectWarns: 2, // high concurrency + no security checks
+			expectWarns:  2, // high concurrency + no security checks
 		},
 		{
 			name: "invalid rate limit delay",
@@ -88,9 +99,9 @@ func TestValidateConfig(t *testing.T) {
 				cfg.RateLimitDelay = -1 * time.Second
 				return cfg
 			}(),
-			expectValid: false,
+			expectValid:  false,
 			expectErrors: 1,
-			expectWarns: 1, // no security checks
+			expectWarns:  2, // no mode specified + no security checks
 		},
 		{
 			name: "zero rate limit delay warning",
@@ -100,9 +111,37 @@ func TestValidateConfig(t *testing.T) {
 				cfg.RateLimitDelay = 0
 				return cfg
 			}(),
-			expectValid: true,
+			expectValid:  true,
 			expectErrors: 0,
-			expectWarns: 2, // zero delay + no security checks
+			expectWarns:  3, // zero delay + no mode specified + no security checks
+		},
+		{
+			name: "both per-host and per-proxy rate limiting warning",
+			config: func() *Config {
+				cfg := testConfig()
+				cfg.RateLimitEnabled = true
+				cfg.RateLimitPerHost = true
+				cfg.RateLimitPerProxy = true
+				cfg.RateLimitDelay = 1 * time.Second // Set proper delay
+				return cfg
+			}(),
+			expectValid:  true,
+			expectErrors: 0,
+			expectWarns:  2, // both modes enabled + no security checks
+		},
+		{
+			name: "no rate limiting mode warning",
+			config: func() *Config {
+				cfg := testConfig()
+				cfg.RateLimitEnabled = true
+				cfg.RateLimitPerHost = false
+				cfg.RateLimitPerProxy = false
+				cfg.RateLimitDelay = 1 * time.Second // Set proper delay
+				return cfg
+			}(),
+			expectValid:  true,
+			expectErrors: 0,
+			expectWarns:  2, // no mode specified + no security checks
 		},
 		{
 			name: "invalid test URL",
@@ -113,9 +152,9 @@ func TestValidateConfig(t *testing.T) {
 				}
 				return cfg
 			}(),
-			expectValid: false,
+			expectValid:  false,
 			expectErrors: 1,
-			expectWarns: 1, // no security checks
+			expectWarns:  1, // no security checks
 		},
 		{
 			name: "empty header name",
@@ -126,9 +165,9 @@ func TestValidateConfig(t *testing.T) {
 				}
 				return cfg
 			}(),
-			expectValid: false,
+			expectValid:  false,
 			expectErrors: 1,
-			expectWarns: 1, // no security checks
+			expectWarns:  1, // no security checks
 		},
 		{
 			name: "problematic header warning",
@@ -139,9 +178,9 @@ func TestValidateConfig(t *testing.T) {
 				}
 				return cfg
 			}(),
-			expectValid: true,
+			expectValid:  true,
 			expectErrors: 0,
-			expectWarns: 2, // problematic header + no security checks
+			expectWarns:  2, // problematic header + no security checks
 		},
 		{
 			name: "negative min response bytes",
@@ -152,9 +191,9 @@ func TestValidateConfig(t *testing.T) {
 				}
 				return cfg
 			}(),
-			expectValid: false,
+			expectValid:  false,
 			expectErrors: 1,
-			expectWarns: 1, // no security checks
+			expectWarns:  1, // no security checks
 		},
 		{
 			name: "very high min response bytes warning",
@@ -165,9 +204,9 @@ func TestValidateConfig(t *testing.T) {
 				}
 				return cfg
 			}(),
-			expectValid: true,
+			expectValid:  true,
 			expectErrors: 0,
-			expectWarns: 2, // high min bytes + no security checks
+			expectWarns:  2, // high min bytes + no security checks
 		},
 		{
 			name: "duplicate cloud provider",
@@ -179,9 +218,9 @@ func TestValidateConfig(t *testing.T) {
 				}
 				return cfg
 			}(),
-			expectValid: false,
+			expectValid:  false,
 			expectErrors: 1,
-			expectWarns: 1, // no security checks
+			expectWarns:  1, // no security checks
 		},
 		{
 			name: "empty cloud provider name",
@@ -192,9 +231,9 @@ func TestValidateConfig(t *testing.T) {
 				}
 				return cfg
 			}(),
-			expectValid: false,
+			expectValid:  false,
 			expectErrors: 1,
-			expectWarns: 1, // no security checks
+			expectWarns:  1, // no security checks
 		},
 		{
 			name: "invalid HTTP method",
@@ -205,9 +244,9 @@ func TestValidateConfig(t *testing.T) {
 				}
 				return cfg
 			}(),
-			expectValid: false,
+			expectValid:  false,
 			expectErrors: 1,
-			expectWarns: 0, // has advanced checks configured
+			expectWarns:  0, // has advanced checks configured
 		},
 		{
 			name: "non-standard HTTP method warning",
@@ -218,9 +257,9 @@ func TestValidateConfig(t *testing.T) {
 				}
 				return cfg
 			}(),
-			expectValid: true,
+			expectValid:  true,
 			expectErrors: 0,
-			expectWarns: 1, // non-standard method
+			expectWarns:  1, // non-standard method
 		},
 		{
 			name: "no security checks warning",
@@ -229,9 +268,9 @@ func TestValidateConfig(t *testing.T) {
 				cfg.AdvancedChecks = proxy.AdvancedChecks{}
 				return cfg
 			}(),
-			expectValid: true,
+			expectValid:  true,
 			expectErrors: 0,
-			expectWarns: 1, // no security checks
+			expectWarns:  1, // no security checks
 		},
 		{
 			name: "invalid status code requirement",
@@ -240,9 +279,9 @@ func TestValidateConfig(t *testing.T) {
 				cfg.RequireStatusCode = 99
 				return cfg
 			}(),
-			expectValid: false,
+			expectValid:  false,
 			expectErrors: 1,
-			expectWarns: 1, // no security checks
+			expectWarns:  1, // no security checks
 		},
 		{
 			name: "duplicate disallowed keywords",
@@ -253,27 +292,131 @@ func TestValidateConfig(t *testing.T) {
 				}
 				return cfg
 			}(),
-			expectValid: true,
+			expectValid:  true,
 			expectErrors: 0,
-			expectWarns: 3, // 2 duplicates + no security checks
+			expectWarns:  3, // 2 duplicates + no security checks
+		},
+		{
+			name: "metrics enabled with empty listen address",
+			config: func() *Config {
+				cfg := testConfig()
+				cfg.Metrics = MetricsConfig{
+					Enabled:    true,
+					ListenAddr: "",
+					Path:       "/metrics",
+				}
+				return cfg
+			}(),
+			expectValid:  false,
+			expectErrors: 1,
+			expectWarns:  1, // no security checks
+		},
+		{
+			name: "metrics enabled with empty path",
+			config: func() *Config {
+				cfg := testConfig()
+				cfg.Metrics = MetricsConfig{
+					Enabled:    true,
+					ListenAddr: ":9090",
+					Path:       "",
+				}
+				return cfg
+			}(),
+			expectValid:  false,
+			expectErrors: 1,
+			expectWarns:  1, // no security checks
+		},
+		{
+			name: "metrics with invalid address format warning",
+			config: func() *Config {
+				cfg := testConfig()
+				cfg.Metrics = MetricsConfig{
+					Enabled:    true,
+					ListenAddr: "localhost",
+					Path:       "/metrics",
+				}
+				return cfg
+			}(),
+			expectValid:  true,
+			expectErrors: 0,
+			expectWarns:  2, // address format + no security checks
+		},
+		{
+			name: "metrics with invalid path format warning",
+			config: func() *Config {
+				cfg := testConfig()
+				cfg.Metrics = MetricsConfig{
+					Enabled:    true,
+					ListenAddr: ":9090",
+					Path:       "metrics",
+				}
+				return cfg
+			}(),
+			expectValid:  true,
+			expectErrors: 0,
+			expectWarns:  2, // path format + no security checks
+		},
+		{
+			name: "connection pool with negative max idle conns",
+			config: func() *Config {
+				cfg := testConfig()
+				cfg.ConnectionPool.MaxIdleConns = -1
+				return cfg
+			}(),
+			expectValid:  false,
+			expectErrors: 1,
+			expectWarns:  1, // no security checks
+		},
+		{
+			name: "connection pool with very high max idle conns warning",
+			config: func() *Config {
+				cfg := testConfig()
+				cfg.ConnectionPool.MaxIdleConns = 2000
+				return cfg
+			}(),
+			expectValid:  true,
+			expectErrors: 0,
+			expectWarns:  2, // high max idle conns + no security checks
+		},
+		{
+			name: "connection pool with invalid TLS handshake timeout",
+			config: func() *Config {
+				cfg := testConfig()
+				cfg.ConnectionPool.TLSHandshakeTimeout = -1 * time.Second
+				return cfg
+			}(),
+			expectValid:  false,
+			expectErrors: 1,
+			expectWarns:  1, // no security checks
+		},
+		{
+			name: "connection pool with low TLS handshake timeout warning",
+			config: func() *Config {
+				cfg := testConfig()
+				cfg.ConnectionPool.TLSHandshakeTimeout = 500 * time.Millisecond
+				return cfg
+			}(),
+			expectValid:  true,
+			expectErrors: 0,
+			expectWarns:  2, // low TLS timeout + no security checks
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := ValidateConfig(tt.config)
-			
+
 			if result.Valid != tt.expectValid {
 				t.Errorf("ValidateConfig() valid = %v, want %v", result.Valid, tt.expectValid)
 			}
-			
+
 			if len(result.Errors) != tt.expectErrors {
 				t.Errorf("ValidateConfig() errors = %d, want %d", len(result.Errors), tt.expectErrors)
 				for _, err := range result.Errors {
 					t.Logf("  Error: %v", err)
 				}
 			}
-			
+
 			if len(result.Warnings) != tt.expectWarns {
 				t.Errorf("ValidateConfig() warnings = %d, want %d", len(result.Warnings), tt.expectWarns)
 				for _, warn := range result.Warnings {
@@ -290,7 +433,7 @@ func TestConfigValidationError_Error(t *testing.T) {
 		Value:   -1,
 		Message: "timeout must be positive",
 	}
-	
+
 	expected := "config validation error in timeout: timeout must be positive (value: -1)"
 	if err.Error() != expected {
 		t.Errorf("ConfigValidationError.Error() = %v, want %v", err.Error(), expected)
@@ -345,13 +488,13 @@ func TestValidateURLs(t *testing.T) {
 			expectValid: false,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Set required fields
 			tt.config.Timeout = 10
 			tt.config.Concurrency = 10
-			
+
 			result := ValidateConfig(tt.config)
 			if result.Valid != tt.expectValid {
 				t.Errorf("ValidateConfig() valid = %v, want %v", result.Valid, tt.expectValid)

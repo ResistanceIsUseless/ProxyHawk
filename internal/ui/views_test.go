@@ -132,7 +132,7 @@ func TestView_CalculateWorkingCount(t *testing.T) {
 	view := &View{
 		ActiveChecks: make(map[string]*CheckStatus),
 	}
-	
+
 	// Add test data
 	view.ActiveChecks["proxy1"] = &CheckStatus{
 		CheckResults: []CheckResult{
@@ -155,7 +155,7 @@ func TestView_CalculateWorkingCount(t *testing.T) {
 
 	result := view.calculateWorkingCount()
 	expected := 2 // proxy1 and proxy3 have at least one successful check
-	
+
 	if result != expected {
 		t.Errorf("calculateWorkingCount() = %v, want %v", result, expected)
 	}
@@ -168,15 +168,15 @@ func contains(s, substr string) bool {
 
 func TestNewView(t *testing.T) {
 	view := NewView()
-	
+
 	if view == nil {
 		t.Error("NewView returned nil")
 	}
-	
+
 	if !view.IsValid() {
 		t.Error("NewView created invalid view")
 	}
-	
+
 	if view.ActiveChecks == nil {
 		t.Error("NewView did not initialize ActiveChecks map")
 	}

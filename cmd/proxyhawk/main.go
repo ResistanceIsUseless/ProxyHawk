@@ -2,12 +2,15 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"flag"
 	"fmt"
 	"net/url"
 	"os"
+	"os/signal"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/ResistanceIsUseless/ProxyHawk/cloudcheck"
@@ -85,6 +88,11 @@ type AppState struct {
 	debug         bool
 	mutex         sync.Mutex   // Mutex to protect shared state
 	updateChan    chan tea.Msg // Channel for sending updates to the UI
+	
+	// Graceful shutdown support
+	ctx           context.Context
+	cancel        context.CancelFunc
+	shutdownChan  chan os.Signal
 	
 	// Output options
 	outputFile    string
@@ -189,10 +197,17 @@ func main() {
 	view := &ui.View{
 		Progress:     p,
 		Total:        len(proxies),
-		IsVerbose:    *verbose,                                                                                        // Only use verbose flag
-		IsDebug:      *debug || config.AdvancedChecks.TestProtocolSmuggling || config.AdvancedChecks.TestDNSRebinding, // Use debug mode if flag or advanced checks are enabled
+		DisplayMode: ui.ViewDisplayMode{
+			IsVerbose: *verbose,                                                                                        // Only use verbose flag
+			IsDebug:   *debug || config.AdvancedChecks.TestProtocolSmuggling || config.AdvancedChecks.TestDNSRebinding, // Use debug mode if flag or advanced checks are enabled
+		},
 		ActiveChecks: make(map[string]*ui.CheckStatus),
 	}
+
+	// Set up graceful shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	shutdownChan := make(chan os.Signal, 1)
+	signal.Notify(shutdownChan, syscall.SIGINT, syscall.SIGTERM)
 
 	// Create application state
 	state := &AppState{
@@ -203,12 +218,31 @@ func main() {
 		verbose:       *verbose, // Only use verbose flag
 		debug:         *debug || config.AdvancedChecks.TestProtocolSmuggling || config.AdvancedChecks.TestDNSRebinding,
 		updateChan:    make(chan tea.Msg, 100), // Buffer for update messages
+		ctx:           ctx,
+		cancel:        cancel,
+		shutdownChan:  shutdownChan,
 		outputFile:    *outputFile,
 		jsonFile:      *jsonFile,
 		workingFile:   *workingFile,
 		anonymousFile: *anonymousFile,
 		noUI:          *noUI,
 	}
+
+	// Start shutdown handler goroutine
+	go func() {
+		<-shutdownChan
+		fmt.Printf("\nReceived shutdown signal, cleaning up...\n")
+		cancel() // Cancel the context to signal all goroutines to stop
+		
+		// Give goroutines time to clean up
+		time.Sleep(2 * time.Second)
+		
+		// Process any remaining results
+		processResults(state)
+		
+		fmt.Printf("Shutdown complete\n")
+		os.Exit(0)
+	}()
 
 	if state.noUI {
 		// Run without UI
@@ -445,10 +479,10 @@ func (s *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		progressCmd := s.view.Progress.SetPercent(progress)
 
 		// Update other metrics
-		s.view.ActiveJobs = 0
+		s.view.Metrics.ActiveJobs = 0
 		for _, status := range s.view.ActiveChecks {
 			if status.IsActive && time.Since(status.LastUpdate) < 5*time.Second {
-				s.view.ActiveJobs++
+				s.view.Metrics.ActiveJobs++
 			}
 		}
 
@@ -460,7 +494,7 @@ func (s *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		if s.view.Current > 0 {
-			s.view.SuccessRate = float64(workingProxies) / float64(s.view.Current) * 100
+			s.view.Metrics.SuccessRate = float64(workingProxies) / float64(s.view.Current) * 100
 		}
 
 		// Calculate average speed
@@ -473,7 +507,7 @@ func (s *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		if speedCount > 0 {
-			s.view.AvgSpeed = totalSpeed / time.Duration(speedCount)
+			s.view.Metrics.AvgSpeed = totalSpeed / time.Duration(speedCount)
 		}
 
 		s.mutex.Unlock()
@@ -494,10 +528,10 @@ func (s *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (s *AppState) View() string {
-	if s.view.IsDebug {
+	if s.view.DisplayMode.IsDebug {
 		return s.view.RenderDebug()
 	}
-	if s.view.IsVerbose {
+	if s.view.DisplayMode.IsVerbose {
 		return s.view.RenderVerbose()
 	}
 	return s.view.RenderDefault()
@@ -509,7 +543,7 @@ func (s *AppState) startChecking() {
 
 	// Set initial queue size
 	s.mutex.Lock()
-	s.view.QueueSize = len(s.proxies)
+	s.view.Metrics.QueueSize = len(s.proxies)
 	s.mutex.Unlock()
 
 	// Send initial update
@@ -552,6 +586,20 @@ func (s *AppState) startChecking() {
 			}
 
 			for proxy := range proxyChan {
+				// Check for cancellation before processing
+				select {
+				case <-s.ctx.Done():
+					if s.debug {
+						s.mutex.Lock()
+						s.view.DebugInfo += fmt.Sprintf("[DEBUG] Worker %d cancelled\n", workerID)
+						s.mutex.Unlock()
+						s.updateChan <- progressUpdateMsg{}
+					}
+					return
+				default:
+					// Continue processing
+				}
+
 				// Update active job status when starting a check
 				s.mutex.Lock()
 				status := &ui.CheckStatus{
@@ -562,9 +610,9 @@ func (s *AppState) startChecking() {
 				s.view.ActiveChecks[proxy] = status
 
 				// Update queue size when starting a check
-				s.view.QueueSize = len(s.proxies) - s.view.Current - s.view.ActiveJobs
-				if s.view.QueueSize < 0 {
-					s.view.QueueSize = 0
+				s.view.Metrics.QueueSize = len(s.proxies) - s.view.Current - s.view.Metrics.ActiveJobs
+				if s.view.Metrics.QueueSize < 0 {
+					s.view.Metrics.QueueSize = 0
 				}
 				s.mutex.Unlock()
 
@@ -618,9 +666,9 @@ func (s *AppState) startChecking() {
 					}
 
 					// Update queue size when a job is marked as inactive
-					s.view.QueueSize = len(s.proxies) - s.view.Current - s.view.ActiveJobs
-					if s.view.QueueSize < 0 {
-						s.view.QueueSize = 0
+					s.view.Metrics.QueueSize = len(s.proxies) - s.view.Current - s.view.Metrics.ActiveJobs
+					if s.view.Metrics.QueueSize < 0 {
+						s.view.Metrics.QueueSize = 0
 					}
 					s.mutex.Unlock()
 
@@ -670,12 +718,25 @@ func (s *AppState) startChecking() {
 	}
 
 	for _, proxy := range s.proxies {
-		if s.debug {
-			s.mutex.Lock()
-			s.view.DebugInfo += fmt.Sprintf("[DEBUG] Sending proxy to channel: %s\n", proxy)
-			s.mutex.Unlock()
+		// Check for cancellation before sending each proxy
+		select {
+		case <-s.ctx.Done():
+			if s.debug {
+				s.mutex.Lock()
+				s.view.DebugInfo += fmt.Sprintf("[DEBUG] Proxy feeding cancelled\n")
+				s.mutex.Unlock()
+				s.updateChan <- progressUpdateMsg{}
+			}
+			close(proxyChan)
+			return
+		default:
+			if s.debug {
+				s.mutex.Lock()
+				s.view.DebugInfo += fmt.Sprintf("[DEBUG] Sending proxy to channel: %s\n", proxy)
+				s.mutex.Unlock()
+			}
+			proxyChan <- proxy
 		}
-		proxyChan <- proxy
 	}
 
 	if s.debug {
@@ -780,9 +841,9 @@ func (s *AppState) processResult(result *proxy.ProxyResult) {
 	s.view.ActiveChecks[result.ProxyURL] = status
 
 	// Update queue size - calculate remaining proxies to check
-	s.view.QueueSize = len(s.proxies) - s.view.Current - s.view.ActiveJobs
-	if s.view.QueueSize < 0 {
-		s.view.QueueSize = 0
+	s.view.Metrics.QueueSize = len(s.proxies) - s.view.Current - s.view.Metrics.ActiveJobs
+	if s.view.Metrics.QueueSize < 0 {
+		s.view.Metrics.QueueSize = 0
 	}
 
 	// Add debug info to the main debug output if in debug mode
@@ -805,6 +866,17 @@ func (s *AppState) startCheckingNoUI() {
 			defer wg.Done()
 
 			for proxy := range proxyChan {
+				// Check for cancellation before processing
+				select {
+				case <-s.ctx.Done():
+					if s.verbose {
+						fmt.Printf("[Worker %d] Cancelled\n", workerID)
+					}
+					return
+				default:
+					// Continue processing
+				}
+
 				if s.verbose {
 					fmt.Printf("[Worker %d] Testing: %s\n", workerID, proxy)
 				}
@@ -836,7 +908,14 @@ func (s *AppState) startCheckingNoUI() {
 
 	// Feed proxies to workers
 	for _, proxy := range s.proxies {
-		proxyChan <- proxy
+		select {
+		case <-s.ctx.Done():
+			fmt.Printf("\nShutdown requested, stopping proxy feeding...\n")
+			close(proxyChan)
+			return
+		case proxyChan <- proxy:
+			// Proxy sent successfully, continue
+		}
 	}
 	close(proxyChan)
 

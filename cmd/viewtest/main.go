@@ -68,18 +68,22 @@ func createMockView() *ui.View {
 
 	// Create the view with mock data
 	view := &ui.View{
-		Progress:     p,
-		Total:        30,
-		Current:      10,
-		ActiveJobs:   5,
-		QueueSize:    15,
-		SuccessRate:  60.0,
-		AvgSpeed:     320 * time.Millisecond,
+		Progress:  p,
+		Total:     30,
+		Current:   10,
+		Metrics: ui.ViewMetrics{
+			ActiveJobs:  5,
+			QueueSize:   15,
+			SuccessRate: 60.0,
+			AvgSpeed:    320 * time.Millisecond,
+		},
 		DebugInfo:    createMockDebugInfo(),
 		SpinnerIdx:   2,
 		ActiveChecks: createMockChecks(),
-		IsVerbose:    false,
-		IsDebug:      false,
+		DisplayMode: ui.ViewDisplayMode{
+			IsVerbose: false,
+			IsDebug:   false,
+		},
 	}
 
 	return view

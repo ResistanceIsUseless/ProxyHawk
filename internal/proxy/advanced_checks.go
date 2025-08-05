@@ -551,6 +551,14 @@ func (c *Checker) checkSSRF(client *http.Client, testDomain string) (*CheckResul
 		"0.0.0.0:22",
 		"255.255.255.255",
 		"224.0.0.1",        // Multicast
+
+		// IPv6 variations
+		"[fc00::1]",        // IPv6 unique local
+		"[fd00::1]:80",     // IPv6 unique local with port
+		"[fe80::1]",        // IPv6 link-local
+		"[::ffff:127.0.0.1]", // IPv6 IPv4-mapped localhost
+		"[2001:db8::1]",    // RFC 3849 documentation prefix
+		"[ff02::1]",        // IPv6 multicast
 	}
 
 	for _, target := range internalTargets {

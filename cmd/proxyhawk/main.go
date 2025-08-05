@@ -86,8 +86,8 @@ func main() {
 		Format: "text",
 	})
 
-	// Load configuration
-	config, err := config.LoadConfig(*configFile)
+	// Load and validate configuration
+	config, validationResult, err := config.ValidateAndLoad(*configFile)
 	if err != nil {
 		// Enhanced error logging with error categorization
 		category := errors.GetErrorCategory(err)
@@ -98,6 +98,23 @@ func main() {
 			"critical", errors.IsCritical(err))
 		os.Exit(1)
 	}
+	
+	// Log validation warnings if any
+	if len(validationResult.Warnings) > 0 {
+		for _, warning := range validationResult.Warnings {
+			logger.Warn("Configuration validation warning", "warning", warning)
+		}
+	}
+	
+	// Check for validation errors
+	if !validationResult.Valid {
+		logger.Error("Configuration validation failed", "errors", len(validationResult.Errors))
+		for _, validationErr := range validationResult.Errors {
+			logger.Error("Configuration error", "error", validationErr.Error())
+		}
+		os.Exit(1)
+	}
+	
 	logger.ConfigLoaded(*configFile)
 
 	// Override config with command line flags if specified

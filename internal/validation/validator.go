@@ -396,13 +396,22 @@ func (v *ProxyValidator) NormalizeProxyURL(proxyURL string) (string, error) {
 	return parsed.String(), nil
 }
 
-// isPrivateIP checks if an IP address is private
+// isPrivateIP checks if an IP address is private or reserved
 func isPrivateIP(ip net.IP) bool {
+	// Handle both IPv4 and IPv6
+	if ip.To4() != nil {
+		return isPrivateIPv4(ip)
+	}
+	return isPrivateIPv6(ip)
+}
+
+// isPrivateIPv4 checks if an IPv4 address is private or reserved
+func isPrivateIPv4(ip net.IP) bool {
 	// RFC 1918 private address ranges
 	privateRanges := []string{
-		"10.0.0.0/8",
-		"172.16.0.0/12",
-		"192.168.0.0/16",
+		"10.0.0.0/8",     // Private-use networks
+		"172.16.0.0/12",  // Private-use networks
+		"192.168.0.0/16", // Private-use networks
 	}
 
 	// RFC 6598 Carrier-grade NAT
@@ -411,9 +420,71 @@ func isPrivateIP(ip net.IP) bool {
 	// RFC 3927 Link-local
 	linkLocal := "169.254.0.0/16"
 
-	allPrivateRanges := append(privateRanges, carrierGradeNAT, linkLocal)
+	// RFC 5737 IPv4 test networks (documentation/examples)
+	testNetworks := []string{
+		"192.0.2.0/24",    // TEST-NET-1
+		"198.51.100.0/24", // TEST-NET-2
+		"203.0.113.0/24",  // TEST-NET-3
+	}
 
-	for _, cidr := range allPrivateRanges {
+	// Additional reserved ranges
+	reservedRanges := []string{
+		"0.0.0.0/8",       // Current network
+		"127.0.0.0/8",     // Loopback
+		"224.0.0.0/4",     // Multicast
+		"240.0.0.0/4",     // Reserved for future use
+		"255.255.255.255/32", // Broadcast
+	}
+
+	// Combine all ranges
+	allRanges := []string{}
+	allRanges = append(allRanges, privateRanges...)
+	allRanges = append(allRanges, carrierGradeNAT, linkLocal)
+	allRanges = append(allRanges, testNetworks...)
+	allRanges = append(allRanges, reservedRanges...)
+
+	for _, cidr := range allRanges {
+		_, network, err := net.ParseCIDR(cidr)
+		if err != nil {
+			continue
+		}
+		if network.Contains(ip) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// isPrivateIPv6 checks if an IPv6 address is private or reserved
+func isPrivateIPv6(ip net.IP) bool {
+	// RFC 4193 Unique Local Addresses
+	uniqueLocal := "fc00::/7"
+
+	// RFC 4291 Link-local addresses
+	linkLocal := "fe80::/10"
+
+	// RFC 3849 IPv6 documentation prefix
+	documentation := "2001:db8::/32"
+
+	// Additional reserved IPv6 ranges
+	reservedRanges := []string{
+		"::/128",         // Unspecified address
+		"::1/128",        // Loopback address
+		"::ffff:0:0/96",  // IPv4-mapped addresses
+		"100::/64",       // Discard prefix
+		"2001::/32",      // Teredo tunneling
+		"2001:10::/28",   // Deprecated (ORCHID)
+		"2001:20::/28",   // ORCHIDv2
+		"2002::/16",      // 6to4
+		"ff00::/8",       // Multicast
+	}
+
+	// Combine all ranges
+	allRanges := []string{uniqueLocal, linkLocal, documentation}
+	allRanges = append(allRanges, reservedRanges...)
+
+	for _, cidr := range allRanges {
 		_, network, err := net.ParseCIDR(cidr)
 		if err != nil {
 			continue

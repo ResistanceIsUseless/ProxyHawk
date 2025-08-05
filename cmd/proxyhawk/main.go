@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ResistanceIsUseless/ProxyHawk/internal/config"
+	"github.com/ResistanceIsUseless/ProxyHawk/internal/errors"
 	"github.com/ResistanceIsUseless/ProxyHawk/internal/loader"
 	"github.com/ResistanceIsUseless/ProxyHawk/internal/logging"
 	"github.com/ResistanceIsUseless/ProxyHawk/internal/output"
@@ -88,7 +89,13 @@ func main() {
 	// Load configuration
 	config, err := config.LoadConfig(*configFile)
 	if err != nil {
-		logger.Error("Failed to load configuration", "error", err, "file", *configFile)
+		// Enhanced error logging with error categorization
+		category := errors.GetErrorCategory(err)
+		logger.Error("Failed to load configuration", 
+			"error", err, 
+			"file", *configFile, 
+			"category", category,
+			"critical", errors.IsCritical(err))
 		os.Exit(1)
 	}
 	logger.ConfigLoaded(*configFile)
@@ -104,7 +111,13 @@ func main() {
 	// Load proxies
 	proxies, warnings, err := loader.LoadProxies(*proxyList)
 	if err != nil {
-		logger.Error("Failed to load proxies", "error", err, "file", *proxyList)
+		// Enhanced error logging with error categorization
+		category := errors.GetErrorCategory(err)
+		logger.Error("Failed to load proxies", 
+			"error", err, 
+			"file", *proxyList, 
+			"category", category,
+			"retryable", errors.IsRetryable(err))
 		os.Exit(1)
 	}
 

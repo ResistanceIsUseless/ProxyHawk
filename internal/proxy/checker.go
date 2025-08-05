@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/ResistanceIsUseless/ProxyHawk/internal/errors"
 )
 
 // NewChecker creates a new proxy checker
@@ -37,7 +39,7 @@ func (c *Checker) Check(proxyURL string) *ProxyResult {
 	// Parse the proxy URL
 	parsedURL, err := url.Parse(proxyURL)
 	if err != nil {
-		result.Error = fmt.Errorf("invalid proxy URL: %v", err)
+		result.Error = errors.NewProxyError(errors.ErrorProxyInvalidURL, "invalid proxy URL", proxyURL, err)
 		if c.debug {
 			result.DebugInfo += fmt.Sprintf("[ERROR] Failed to parse URL: %v\n", err)
 		}
@@ -53,7 +55,7 @@ func (c *Checker) Check(proxyURL string) *ProxyResult {
 	proxyType, client, err := c.determineProxyType(parsedURL, result)
 	if err != nil {
 		// Create a more concise error message
-		result.Error = fmt.Errorf("proxy check failed: %v", err)
+		result.Error = errors.NewProxyError(errors.ErrorProxyNotWorking, "proxy check failed", proxyURL, err)
 		if c.debug {
 			result.DebugInfo += fmt.Sprintf("[RESULT] Proxy type detection failed: %v\n", err)
 		}
@@ -69,7 +71,7 @@ func (c *Checker) Check(proxyURL string) *ProxyResult {
 
 	// Perform checks using the determined client
 	if err := c.performChecks(client, result); err != nil {
-		result.Error = fmt.Errorf("validation failed: %v", err)
+		result.Error = errors.NewProxyError(errors.ErrorProxyValidationFailed, "validation failed", proxyURL, err)
 		if c.debug {
 			result.DebugInfo += fmt.Sprintf("[RESULT] Validation checks failed: %v\n", err)
 		}
@@ -509,7 +511,7 @@ func (c *Checker) performChecks(client *http.Client, result *ProxyResult) error 
 		if c.debug {
 			result.DebugInfo += fmt.Sprintf("[VALIDATE] Request failed: %v\n", err)
 		}
-		return fmt.Errorf("request failed: %v", err)
+		return errors.NewHTTPError(errors.ErrorHTTPRequestFailed, "request failed", c.config.ValidationURL, err)
 	}
 	defer resp.Body.Close()
 
@@ -549,7 +551,9 @@ func (c *Checker) performChecks(client *http.Client, result *ProxyResult) error 
 		if c.debug {
 			result.DebugInfo += fmt.Sprintf("[VALIDATE] Status code check failed: %s\n", validationCheck.Error)
 		}
-		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		return errors.NewHTTPError(errors.ErrorHTTPUnexpectedStatus, "unexpected status code", c.config.ValidationURL, nil).
+			WithDetail("status_code", resp.StatusCode).
+			WithDetail("expected_code", c.config.RequireStatusCode)
 	}
 
 	// Check response size

@@ -1,11 +1,11 @@
 package config
 
 import (
-	"fmt"
 	"os"
 	"time"
 
 	"github.com/ResistanceIsUseless/ProxyHawk/cloudcheck"
+	"github.com/ResistanceIsUseless/ProxyHawk/internal/errors"
 	"github.com/ResistanceIsUseless/ProxyHawk/internal/proxy"
 	"gopkg.in/yaml.v3"
 )
@@ -68,12 +68,13 @@ func LoadConfig(filename string) (*Config, error) {
 
 	data, err := os.ReadFile(filename)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read config file: %v", err)
+		return nil, errors.NewFileError(errors.ErrorFileReadFailed, "failed to read config file", filename, err)
 	}
 
 	var config Config
 	if err := yaml.Unmarshal(data, &config); err != nil {
-		return nil, fmt.Errorf("error parsing config file: %v", err)
+		return nil, errors.NewConfigError(errors.ErrorConfigParsingFailed, "error parsing config file", err).
+			WithDetail("filename", filename)
 	}
 
 	// Set default concurrency if not specified

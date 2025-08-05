@@ -34,7 +34,7 @@ type ShodanResult struct {
 	ASN       string            `json:"asn"`
 	ISP       string            `json:"isp"`
 	Org       string            `json:"org"`
-	Headers   map[string]string `json:"http,omitempty"`
+	Headers   interface{} `json:"http,omitempty"` // Can be map or number
 	Product   string            `json:"product,omitempty"`
 	Version   string            `json:"version,omitempty"`
 	OS        string            `json:"os,omitempty"`
@@ -317,7 +317,7 @@ func (s *ShodanDiscoverer) convertToCandidate(result ShodanResult) *ProxyCandida
 		ServerHeader: s.extractServerHeader(result),
 		ResponseSize: int64(len(result.Data)),
 		TLSEnabled:   result.Port == 443 || result.Port == 8443 || strings.Contains(result.Data, "SSL"),
-		Headers:      result.Headers,
+		Headers:      s.extractHeaders(result),
 		ProxyHeaders: s.extractProxyHeaders(result),
 		ProxyType:    s.inferProxyType(result),
 		Confidence:   s.scoreProxyCandidate(result),
@@ -368,12 +368,28 @@ func (s *ShodanDiscoverer) inferProtocol(result ShodanResult) string {
 	return "http" // Default assumption
 }
 
+// extractHeaders converts Shodan headers to map[string]string
+func (s *ShodanDiscoverer) extractHeaders(result ShodanResult) map[string]string {
+	headers := make(map[string]string)
+	
+	if result.Headers != nil {
+		if headerMap, ok := result.Headers.(map[string]interface{}); ok {
+			for key, value := range headerMap {
+				if strValue, ok := value.(string); ok {
+					headers[key] = strValue
+				}
+			}
+		}
+	}
+	
+	return headers
+}
+
 // extractServerHeader extracts the server header from Shodan data
 func (s *ShodanDiscoverer) extractServerHeader(result ShodanResult) string {
-	if result.Headers != nil {
-		if server, ok := result.Headers["server"]; ok {
-			return server
-		}
+	headers := s.extractHeaders(result)
+	if server, ok := headers["server"]; ok {
+		return server
 	}
 
 	// Try to extract from raw data

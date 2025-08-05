@@ -108,7 +108,7 @@ func main() {
 
 	// Discovery flags
 	discoverMode := flag.Bool("discover", false, "Enable discovery mode to find proxy candidates")
-	discoverSource := flag.String("discover-source", "all", "Discovery source to use (shodan, all)")
+	discoverSource := flag.String("discover-source", "all", "Discovery source to use (shodan, censys, freelists, webscraper, all)")
 	discoverQuery := flag.String("discover-query", "", "Custom discovery query (uses preset if empty)")
 	discoverLimit := flag.Int("discover-limit", 100, "Maximum number of candidates to discover")
 	discoverValidate := flag.Bool("discover-validate", false, "Validate discovered candidates immediately")
@@ -1068,9 +1068,13 @@ func runDiscoveryMode(cfg *config.Config, logger *logging.Logger, source, query 
 	availableSources := manager.GetAvailableSources()
 	if len(availableSources) == 0 {
 		logger.Error("No discovery sources configured",
-			"required", "shodan_api_key in config file or SHODAN_API_KEY environment variable")
+			"required", "API keys in config file or environment variables")
 		fmt.Fprintf(os.Stderr, "Error: No discovery sources configured.\n")
-		fmt.Fprintf(os.Stderr, "Please add your Shodan API key to the config file or set SHODAN_API_KEY environment variable.\n")
+		fmt.Fprintf(os.Stderr, "Available sources:\n")
+		fmt.Fprintf(os.Stderr, "  - Shodan: Add shodan_api_key to config or set SHODAN_API_KEY env var\n")
+		fmt.Fprintf(os.Stderr, "  - Censys: Add censys_api_key and censys_secret to config\n")
+		fmt.Fprintf(os.Stderr, "  - Free Lists: Always available (no API key required)\n")
+		fmt.Fprintf(os.Stderr, "  - Web Scraper: Always available (no API key required)\n")
 		os.Exit(1)
 	}
 

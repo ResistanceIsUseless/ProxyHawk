@@ -34,6 +34,17 @@ func NewManager(discoveryConfig config.DiscoveryConfig, logger *logging.Logger) 
 	if discoveryConfig.ShodanAPIKey != "" {
 		m.discoverers["shodan"] = NewShodanDiscoverer(discoveryConfig.ShodanAPIKey)
 	}
+	
+	// Initialize Censys discoverer if configured
+	if discoveryConfig.CensysAPIKey != "" && discoveryConfig.CensysSecret != "" {
+		m.discoverers["censys"] = NewCensysDiscoverer(discoveryConfig.CensysAPIKey, discoveryConfig.CensysSecret)
+	}
+	
+	// Initialize free lists discoverer (always available)
+	m.discoverers["freelists"] = NewFreeListsDiscoverer()
+	
+	// Initialize web scraper discoverer (always available)
+	m.discoverers["webscraper"] = NewWebScraperDiscoverer()
 
 	return m
 }
@@ -244,6 +255,21 @@ func (m *Manager) GetPresetQueries() map[string][]string {
 		queries["shodan"] = ShodanProxyQueries
 	}
 
+	// Add Censys queries if available
+	if _, exists := m.discoverers["censys"]; exists {
+		queries["censys"] = CensysProxyQueries
+	}
+
+	// Add free lists queries if available
+	if _, exists := m.discoverers["freelists"]; exists {
+		queries["freelists"] = FreeListProxyQueries
+	}
+
+	// Add web scraper queries if available
+	if _, exists := m.discoverers["webscraper"]; exists {
+		queries["webscraper"] = WebScraperProxyQueries
+	}
+
 	// Add general queries
 	queries["general"] = []string{
 		"proxy server",
@@ -252,7 +278,10 @@ func (m *Manager) GetPresetQueries() map[string][]string {
 		"apache proxy",
 		"socks proxy",
 		"http proxy",
+		"https proxy",
 		"anonymous proxy",
+		"elite proxy",
+		"transparent proxy",
 	}
 
 	return queries

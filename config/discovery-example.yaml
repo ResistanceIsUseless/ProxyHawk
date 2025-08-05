@@ -10,8 +10,8 @@ concurrency: 10
 discovery:
   # API credentials (set these with your actual keys)
   shodan_api_key: "YOUR_SHODAN_API_KEY_HERE"
-  # censys_api_key: "YOUR_CENSYS_API_KEY_HERE" 
-  # censys_secret: "YOUR_CENSYS_SECRET_HERE"
+  censys_api_key: "YOUR_CENSYS_API_KEY_HERE" 
+  censys_secret: "YOUR_CENSYS_SECRET_HERE"
 
   # Search parameters
   max_results: 1000          # Maximum candidates to discover per search

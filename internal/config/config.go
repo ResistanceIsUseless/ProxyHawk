@@ -172,6 +172,17 @@ func LoadConfig(filename string) (*Config, error) {
 		config.TestURLs.DefaultURL = "https://api.ipify.org?format=json"
 	}
 
+	// Override with environment variables if present
+	if shodanKey := os.Getenv("SHODAN_API_KEY"); shodanKey != "" {
+		config.Discovery.ShodanAPIKey = shodanKey
+	}
+	if censysID := os.Getenv("CENSYS_API_ID"); censysID != "" {
+		config.Discovery.CensysAPIKey = censysID
+	}
+	if censysSecret := os.Getenv("CENSYS_SECRET"); censysSecret != "" {
+		config.Discovery.CensysSecret = censysSecret
+	}
+
 	return &config, nil
 }
 

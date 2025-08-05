@@ -60,12 +60,16 @@ make docker-run    # Run in container
 - Multiple output formats (text, JSON, working proxies only)
 
 ### Proxy Discovery & Intelligence
-- **Shodan Integration**: Discover proxies using Shodan's comprehensive database
+- **Multiple Discovery Sources**: Discover proxies from various sources
+  - **Shodan Integration**: Professional internet scanning database
+  - **Censys Integration**: Comprehensive internet-wide asset discovery
+  - **Free Proxy Lists**: Aggregated from ProxyList.geonode.com, FreeProxy.world
+  - **Web Scraping**: Real-time scraping from public proxy sources
 - **Smart Filtering**: Filter by country, confidence score, proxy type, and more
 - **Intelligent Scoring**: Advanced scoring system based on multiple factors
 - **Auto-Validation**: Automatically test discovered candidates
 - **Deduplication**: Remove duplicate candidates across sources
-- **Preset Queries**: Built-in search queries for different proxy types
+- **Preset Queries**: Built-in search queries optimized for each source
 
 ### Security Testing & Validation
 - **SSRF Detection**: Tests access to cloud metadata services (AWS, GCP, Azure), internal networks (RFC 1918, RFC 6598, RFC 3927), and localhost variants
@@ -114,10 +118,21 @@ cloud_providers:
 
 # Discovery configuration
 discovery:
+  # API credentials for discovery sources
   shodan_api_key: "YOUR_SHODAN_API_KEY"
+  censys_api_key: "YOUR_CENSYS_API_KEY"
+  censys_secret: "YOUR_CENSYS_SECRET"
+  
+  # Search parameters
   max_results: 1000
   countries: ["US", "GB", "DE", "NL"]
   min_confidence: 0.3
+  timeout: 30
+  rate_limit: 60  # requests per minute
+  
+  # Filtering options
+  exclude_residential: true
+  exclude_cdn: true
   exclude_malicious: true
   deduplicate: true
 ```
@@ -177,7 +192,7 @@ Protocol Support:
 
 Discovery Options:
 - -discover: Enable discovery mode to find proxy candidates
-- -discover-source: Discovery source to use (shodan, all) (default: all)
+- -discover-source: Discovery source to use (shodan, censys, freelists, webscraper, all) (default: all)
 - -discover-query: Custom discovery query (uses preset if empty)
 - -discover-limit: Maximum number of candidates to discover (default: 100)
 - -discover-validate: Validate discovered candidates immediately
@@ -258,6 +273,26 @@ Discover proxies using Shodan (requires API key):
 ./proxyhawk -discover -discover-source shodan -discover-limit 50
 ```
 
+Discover proxies using Censys (requires API credentials):
+```bash
+./proxyhawk -discover -discover-source censys -discover-limit 100 -v
+```
+
+Discover proxies from free lists (no API key required):
+```bash
+./proxyhawk -discover -discover-source freelists -discover-limit 200
+```
+
+Discover proxies using web scraping (no API key required):
+```bash
+./proxyhawk -discover -discover-source webscraper -discover-limit 150
+```
+
+Discover from all available sources:
+```bash
+./proxyhawk -discover -discover-source all -discover-limit 500 -v
+```
+
 Discover and validate proxies from specific countries:
 ```bash
 ./proxyhawk -discover -discover-countries "US,GB,DE" -discover-validate -o discovered.txt
@@ -271,6 +306,11 @@ Custom discovery query with confidence filtering:
 Discover high-quality proxies and save working ones:
 ```bash
 ./proxyhawk -discover -discover-limit 200 -discover-validate -wp working-discovered.txt -v
+```
+
+Discover proxies by specific source with validation:
+```bash
+./proxyhawk -discover -discover-source censys -discover-query "services.service_name: http and services.port: 3128" -discover-validate -o censys-proxies.txt
 ```
 
 ### Output Formats

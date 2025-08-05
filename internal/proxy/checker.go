@@ -2,103 +2,14 @@ package proxy
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
-
-	"github.com/ResistanceIsUseless/ProxyHawk/cloudcheck"
-	"h12.io/socks"
 )
-
-// ProxyType represents the type of proxy
-type ProxyType string
-
-const (
-	ProxyTypeUnknown ProxyType = "unknown"
-	ProxyTypeHTTP    ProxyType = "http"
-	ProxyTypeHTTPS   ProxyType = "https"
-	ProxyTypeSOCKS4  ProxyType = "socks4"
-	ProxyTypeSOCKS5  ProxyType = "socks5"
-)
-
-// Config represents proxy checker configuration
-type Config struct {
-	// General settings
-	Timeout            time.Duration
-	ValidationURL      string
-	ValidationPattern  string
-	DisallowedKeywords []string
-	MinResponseBytes   int
-	DefaultHeaders     map[string]string
-	UserAgent          string
-	EnableCloudChecks  bool
-	CloudProviders     []cloudcheck.CloudProvider
-	UseRDNS            bool // Whether to use rDNS lookup for host headers
-
-	// Rate limiting settings
-	RateLimitEnabled bool          // Whether rate limiting is enabled
-	RateLimitDelay   time.Duration // Delay between requests to the same host
-	RateLimitPerHost bool          // Whether to apply rate limiting per host or globally
-
-	// Response validation settings
-	RequireStatusCode   int
-	RequireContentMatch string
-	RequireHeaderFields []string
-
-	// Advanced security checks
-	AdvancedChecks AdvancedChecks
-
-	// Interactsh settings (used only when advanced checks are enabled)
-	InteractshURL   string // URL of the Interactsh server (optional)
-	InteractshToken string // Token for the Interactsh server (optional)
-}
-
-// CheckResult represents the result of checking a proxy
-type CheckResult struct {
-	URL        string        `json:"url"`
-	Success    bool          `json:"success"`
-	Speed      time.Duration `json:"speed"`
-	Error      string        `json:"error,omitempty"`
-	StatusCode int           `json:"status_code"`
-	BodySize   int64         `json:"body_size"`
-}
-
-// ProxyResult represents the complete result of proxy checking
-type ProxyResult struct {
-	ProxyURL       string
-	Type           ProxyType
-	Working        bool
-	Speed          time.Duration
-	Error          string
-	IsAnonymous    bool
-	RealIP         string
-	ProxyIP        string
-	CloudProvider  string
-	InternalAccess bool
-	MetadataAccess bool
-	CheckResults   []CheckResult
-	DebugInfo      string
-
-	// New fields for protocol support
-	SupportsHTTP  bool
-	SupportsHTTPS bool
-}
-
-// Checker handles proxy checking functionality
-type Checker struct {
-	config Config
-	debug  bool
-
-	// Rate limiting
-	rateLimiter     map[string]time.Time // Map of host to last request time
-	rateLimiterLock sync.Mutex           // Mutex to protect the rate limiter map
-}
 
 // NewChecker creates a new proxy checker
 func NewChecker(config Config, debug bool) *Checker {
@@ -126,7 +37,7 @@ func (c *Checker) Check(proxyURL string) *ProxyResult {
 	// Parse the proxy URL
 	parsedURL, err := url.Parse(proxyURL)
 	if err != nil {
-		result.Error = fmt.Sprintf("invalid proxy URL: %v", err)
+		result.Error = fmt.Errorf("invalid proxy URL: %v", err)
 		if c.debug {
 			result.DebugInfo += fmt.Sprintf("[ERROR] Failed to parse URL: %v\n", err)
 		}
@@ -142,7 +53,7 @@ func (c *Checker) Check(proxyURL string) *ProxyResult {
 	proxyType, client, err := c.determineProxyType(parsedURL, result)
 	if err != nil {
 		// Create a more concise error message
-		result.Error = fmt.Sprintf("proxy check failed: %v", err)
+		result.Error = fmt.Errorf("proxy check failed: %v", err)
 		if c.debug {
 			result.DebugInfo += fmt.Sprintf("[RESULT] Proxy type detection failed: %v\n", err)
 		}
@@ -158,7 +69,7 @@ func (c *Checker) Check(proxyURL string) *ProxyResult {
 
 	// Perform checks using the determined client
 	if err := c.performChecks(client, result); err != nil {
-		result.Error = fmt.Sprintf("validation failed: %v", err)
+		result.Error = fmt.Errorf("validation failed: %v", err)
 		if c.debug {
 			result.DebugInfo += fmt.Sprintf("[RESULT] Validation checks failed: %v\n", err)
 		}
@@ -582,207 +493,7 @@ func (c *Checker) determineProxyType(proxyURL *url.URL, result *ProxyResult) (Pr
 	return ProxyTypeUnknown, nil, fmt.Errorf("could not determine proxy type: %s", lastError)
 }
 
-// createClient creates an HTTP client for the given proxy type
-func (c *Checker) createClient(proxyURL *url.URL, scheme string, result *ProxyResult) (*http.Client, error) {
-	if c.debug {
-		result.DebugInfo += fmt.Sprintf("[DEBUG] Creating client for scheme: %s\n", scheme)
-		result.DebugInfo += fmt.Sprintf("[DEBUG] Proxy URL: %s\n", proxyURL.String())
-	}
 
-	transport := &http.Transport{
-		TLSHandshakeTimeout:   c.config.Timeout / 2,
-		ResponseHeaderTimeout: c.config.Timeout / 2,
-		ExpectContinueTimeout: 1 * time.Second,
-		MaxIdleConns:          100,
-		MaxIdleConnsPerHost:   10,
-		IdleConnTimeout:       90 * time.Second,
-		DisableKeepAlives:     true,
-		ForceAttemptHTTP2:     false,
-		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: true,
-		},
-	}
-
-	switch {
-	case scheme == "http" || scheme == "https":
-		transport.Proxy = func(_ *http.Request) (*url.URL, error) {
-			proxyURLWithScheme := fmt.Sprintf("%s://%s", scheme, proxyURL.Host)
-			if c.debug {
-				result.DebugInfo += fmt.Sprintf("[DEBUG] Setting up %s proxy: %s\n", scheme, proxyURLWithScheme)
-			}
-			return url.Parse(proxyURLWithScheme)
-		}
-
-	case scheme == "socks4" || scheme == "socks5":
-		dialSocksProxy := socks.Dial(fmt.Sprintf("%s://%s", scheme, proxyURL.Host))
-		if c.debug {
-			result.DebugInfo += fmt.Sprintf("[DEBUG] Setting up %s proxy with dial function\n", scheme)
-		}
-		transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-			if c.debug {
-				result.DebugInfo += fmt.Sprintf("[DEBUG] Dialing %s address: %s\n", network, addr)
-			}
-			conn, err := dialSocksProxy(network, addr)
-			if err != nil && c.debug {
-				result.DebugInfo += fmt.Sprintf("[DEBUG] Dial error: %v\n", err)
-			}
-			return conn, err
-		}
-	}
-
-	client := &http.Client{
-		Transport: transport,
-		Timeout:   c.config.Timeout,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
-
-	if c.debug {
-		result.DebugInfo += fmt.Sprintf("[DEBUG] Created client with timeout: %v\n", client.Timeout)
-	}
-
-	return client, nil
-}
-
-// testClientWithDetails tests if the client works with a simple request and returns detailed information
-// This is an enhanced version of testClientWithError that also returns the CheckResult
-func (c *Checker) testClientWithDetails(client *http.Client, proxyType ProxyType, result *ProxyResult) (bool, string, *CheckResult) {
-	// Use different validation URLs based on proxy type
-	testURL := c.config.ValidationURL
-	if proxyType == ProxyTypeSOCKS4 || proxyType == ProxyTypeSOCKS5 {
-		// For SOCKS proxies, try a plain HTTP URL first
-		testURL = "http://api.ipify.org?format=json"
-	}
-
-	checkResult := &CheckResult{
-		URL: testURL,
-	}
-
-	// For HTTPS URLs through HTTP proxies, we need to handle the CONNECT method
-	isHTTPSOverHTTP := strings.HasPrefix(testURL, "https://") && proxyType == ProxyTypeHTTP
-
-	req, err := http.NewRequest("GET", testURL, nil)
-	if err != nil {
-		errMsg := fmt.Sprintf("error creating request: %v", err)
-		checkResult.Error = errMsg
-		if c.debug {
-			result.DebugInfo += fmt.Sprintf("[CHECK] %s\n", errMsg)
-		}
-		return false, errMsg, checkResult
-	}
-
-	// Add headers
-	req.Header.Set("User-Agent", c.config.UserAgent)
-	for key, value := range c.config.DefaultHeaders {
-		req.Header.Set(key, value)
-	}
-
-	if c.debug {
-		result.DebugInfo += fmt.Sprintf("[CHECK] Testing %s proxy connection to: %s\n", proxyType, testURL)
-	}
-
-	start := time.Now()
-	resp, err := client.Do(req)
-	checkResult.Speed = time.Since(start)
-
-	if err != nil {
-		// For HTTPS over HTTP proxy, we need to check if this is a CONNECT error
-		if isHTTPSOverHTTP {
-			if strings.Contains(err.Error(), "Proxy Authentication Required") ||
-				strings.Contains(err.Error(), "407") {
-				errMsg := fmt.Sprintf("%s proxy requires authentication", proxyType)
-				checkResult.Error = errMsg
-				if c.debug {
-					result.DebugInfo += fmt.Sprintf("[CHECK] %s\n", errMsg)
-				}
-				return false, errMsg, checkResult
-			}
-
-			// Some proxies might return different errors for CONNECT
-			if strings.Contains(err.Error(), "CONNECT") {
-				// This might be a CONNECT handshake error, which is expected
-				// Let's try to determine if it's a valid proxy despite the error
-				if strings.Contains(err.Error(), "connection established") ||
-					strings.Contains(err.Error(), "200") {
-					// This is actually a successful CONNECT, but the subsequent request failed
-					if c.debug {
-						result.DebugInfo += fmt.Sprintf("[CHECK] CONNECT succeeded but subsequent request failed: %v\n", err)
-					}
-					// We'll mark this as a potential HTTP proxy that supports CONNECT
-					result.SupportsHTTPS = true
-					return true, "", checkResult
-				}
-			}
-		}
-
-		errMsg := fmt.Sprintf("%s connection error: %v", proxyType, err)
-		checkResult.Error = errMsg
-		if c.debug {
-			result.DebugInfo += fmt.Sprintf("[CHECK] Connection error for %s proxy: %v\n", proxyType, err)
-		}
-		return false, errMsg, checkResult
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		errMsg := fmt.Sprintf("error reading response body: %v", err)
-		checkResult.Error = errMsg
-		if c.debug {
-			result.DebugInfo += fmt.Sprintf("[CHECK] %s\n", errMsg)
-		}
-		return false, errMsg, checkResult
-	}
-
-	checkResult.StatusCode = resp.StatusCode
-	checkResult.BodySize = int64(len(body))
-	checkResult.Success = true
-
-	if c.debug {
-		result.DebugInfo += fmt.Sprintf("[CHECK] Response status: %d\n", resp.StatusCode)
-		result.DebugInfo += fmt.Sprintf("[CHECK] Response size: %d bytes\n", len(body))
-		result.DebugInfo += fmt.Sprintf("[CHECK] Response time: %v\n", checkResult.Speed)
-	}
-
-	// For HTTPS over HTTP proxy, we need to be more lenient with status codes
-	// as some proxies might return different success codes for CONNECT
-	if isHTTPSOverHTTP {
-		if resp.StatusCode == http.StatusOK || // 200 OK
-			resp.StatusCode == http.StatusCreated || // 201 Created
-			resp.StatusCode == http.StatusAccepted || // 202 Accepted
-			resp.StatusCode == http.StatusNoContent { // 204 No Content
-			result.SupportsHTTPS = true
-		}
-	} else if resp.StatusCode >= 400 {
-		errMsg := fmt.Sprintf("server returned error status: %d %s", resp.StatusCode, resp.Status)
-		checkResult.Error = errMsg
-		checkResult.Success = false
-		return false, errMsg, checkResult
-	}
-
-	if len(body) < c.config.MinResponseBytes {
-		errMsg := fmt.Sprintf("response too small: %d bytes (min: %d)", len(body), c.config.MinResponseBytes)
-		checkResult.Error = errMsg
-		checkResult.Success = false
-		return false, errMsg, checkResult
-	}
-
-	return true, "", checkResult
-}
-
-// testClientWithError tests if the client works with a simple request and returns detailed error information
-// This is kept for backward compatibility
-func (c *Checker) testClientWithError(client *http.Client, proxyType ProxyType, result *ProxyResult) (bool, string) {
-	success, errMsg, _ := c.testClientWithDetails(client, proxyType, result)
-	return success, errMsg
-}
-
-// testClient tests if the client works with a simple request
-func (c *Checker) testClient(client *http.Client, proxyType ProxyType, result *ProxyResult) bool {
-	success, _, _ := c.testClientWithDetails(client, proxyType, result)
-	return success
-}
 
 // performChecks runs all configured checks for the proxy
 func (c *Checker) performChecks(client *http.Client, result *ProxyResult) error {
@@ -1003,65 +714,6 @@ func lookupRDNS(ip string) (string, error) {
 	return strings.TrimSuffix(names[0], "."), nil
 }
 
-// validateResponse validates the HTTP response
-func (c *Checker) validateResponse(resp *http.Response, body []byte) bool {
-	if resp.StatusCode >= 400 {
-		return false
-	}
-
-	if len(body) < c.config.MinResponseBytes {
-		return false
-	}
-
-	for _, keyword := range c.config.DisallowedKeywords {
-		if strings.Contains(string(body), keyword) {
-			return false
-		}
-	}
-
-	return true
-}
-
-// checkAnonymity checks if the proxy is anonymous
-func (c *Checker) checkAnonymity(client *http.Client) (bool, string, string, error) {
-	// Implementation for checking proxy anonymity
-	return false, "", "", nil // Placeholder
-}
-
-// applyRateLimit applies rate limiting based on configuration
-func (c *Checker) applyRateLimit(host string, result *ProxyResult) {
-	if !c.config.RateLimitEnabled {
-		return
-	}
-
-	c.rateLimiterLock.Lock()
-	defer c.rateLimiterLock.Unlock()
-
-	// Determine the key for rate limiting
-	rateLimitKey := "global"
-	if c.config.RateLimitPerHost {
-		rateLimitKey = host
-	}
-
-	// Check if we need to wait
-	if lastTime, exists := c.rateLimiter[rateLimitKey]; exists {
-		elapsed := time.Since(lastTime)
-		if elapsed < c.config.RateLimitDelay {
-			waitTime := c.config.RateLimitDelay - elapsed
-			if c.debug {
-				result.DebugInfo += fmt.Sprintf("[DEBUG] Rate limiting: waiting %v before request to %s\n", waitTime, host)
-			}
-			time.Sleep(waitTime)
-		}
-	}
-
-	// Update the last request time
-	c.rateLimiter[rateLimitKey] = time.Now()
-
-	if c.debug {
-		result.DebugInfo += fmt.Sprintf("[DEBUG] Rate limiting applied for %s\n", rateLimitKey)
-	}
-}
 
 func (c *Checker) makeRequest(client *http.Client, urlStr string, result *ProxyResult) (*http.Response, error) {
 	// Create a context with the configured timeout

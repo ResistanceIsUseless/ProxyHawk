@@ -641,8 +641,8 @@ func (s *AppState) startChecking() {
 						s.mutex.Lock()
 						// Create a more concise error message
 						errorMsg := "Proxy not working"
-						if result.Error != "" {
-							errorMsg = result.Error
+						if result.Error != nil {
+							errorMsg = result.Error.Error()
 							// Truncate long error messages
 							if len(errorMsg) > 100 {
 								errorMsg = errorMsg[:97] + "..."

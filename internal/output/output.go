@@ -44,6 +44,10 @@ type SummaryOutput struct {
 func ConvertToOutputFormat(results []*proxy.ProxyResult) []ProxyResultOutput {
 	output := make([]ProxyResultOutput, len(results))
 	for i, result := range results {
+		errorMsg := ""
+		if result.Error != nil {
+			errorMsg = result.Error.Error()
+		}
 		output[i] = ProxyResultOutput{
 			Proxy:          result.ProxyURL,
 			Working:        result.Working,
@@ -56,7 +60,7 @@ func ConvertToOutputFormat(results []*proxy.ProxyResult) []ProxyResultOutput {
 			InternalAccess: result.InternalAccess,
 			MetadataAccess: result.MetadataAccess,
 			Timestamp:      time.Now(),
-			Error:          result.Error,
+			Error:          errorMsg,
 			Type:           string(result.Type),
 		}
 	}

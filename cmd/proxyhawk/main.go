@@ -12,6 +12,7 @@ import (
 
 	"github.com/ResistanceIsUseless/ProxyHawk/internal/config"
 	"github.com/ResistanceIsUseless/ProxyHawk/internal/loader"
+	"github.com/ResistanceIsUseless/ProxyHawk/internal/logging"
 	"github.com/ResistanceIsUseless/ProxyHawk/internal/output"
 	"github.com/ResistanceIsUseless/ProxyHawk/internal/proxy"
 	"github.com/ResistanceIsUseless/ProxyHawk/internal/ui"
@@ -29,6 +30,7 @@ type AppState struct {
 	concurrency   int
 	verbose       bool
 	debug         bool
+	logger        *logging.Logger
 	mutex         sync.Mutex   // Mutex to protect shared state
 	updateChan    chan tea.Msg // Channel for sending updates to the UI
 	
@@ -73,12 +75,23 @@ func main() {
 
 	flag.Parse()
 
+	// Initialize logger based on debug/verbose flags
+	logLevel := logging.LevelInfo
+	if *debug {
+		logLevel = logging.LevelDebug
+	}
+	logger := logging.NewLogger(logging.Config{
+		Level:  logLevel,
+		Format: "text",
+	})
+
 	// Load configuration
 	config, err := config.LoadConfig(*configFile)
 	if err != nil {
-		fmt.Printf("Error loading config: %v\n", err)
+		logger.Error("Failed to load configuration", "error", err, "file", *configFile)
 		os.Exit(1)
 	}
+	logger.ConfigLoaded(*configFile)
 
 	// Override config with command line flags if specified
 	if *concurrency > 0 {
@@ -91,19 +104,21 @@ func main() {
 	// Load proxies
 	proxies, warnings, err := loader.LoadProxies(*proxyList)
 	if err != nil {
-		fmt.Printf("Error loading proxies: %v\n", err)
+		logger.Error("Failed to load proxies", "error", err, "file", *proxyList)
 		os.Exit(1)
 	}
 
 	// Check if we have any proxies to work with
 	if len(proxies) == 0 {
-		fmt.Println("Error: No valid proxies found to check. Please provide a file with valid proxy entries.")
+		logger.Error("No valid proxies found to check", "file", *proxyList)
 		os.Exit(1)
 	}
 
-	// Print any warnings
+	logger.ProxiesLoaded(len(proxies), *proxyList)
+
+	// Log any warnings
 	for _, warning := range warnings {
-		fmt.Printf("Warning: %s\n", warning)
+		logger.Warn("Proxy loading warning", "warning", warning)
 	}
 
 	// Create proxy checker
@@ -160,6 +175,7 @@ func main() {
 		concurrency:   config.Concurrency,
 		verbose:       *verbose, // Only use verbose flag
 		debug:         *debug || config.AdvancedChecks.TestProtocolSmuggling || config.AdvancedChecks.TestDNSRebinding,
+		logger:        logger,
 		updateChan:    make(chan tea.Msg, 100), // Buffer for update messages
 		ctx:           ctx,
 		cancel:        cancel,
@@ -174,7 +190,7 @@ func main() {
 	// Start shutdown handler goroutine
 	go func() {
 		<-shutdownChan
-		fmt.Printf("\nReceived shutdown signal, cleaning up...\n")
+		logger.ShutdownReceived()
 		cancel() // Cancel the context to signal all goroutines to stop
 		
 		// Give goroutines time to clean up
@@ -183,13 +199,13 @@ func main() {
 		// Process any remaining results
 		processResults(state)
 		
-		fmt.Printf("Shutdown complete\n")
+		logger.ShutdownComplete()
 		os.Exit(0)
 	}()
 
 	if state.noUI {
 		// Run without UI
-		fmt.Printf("Starting proxy checks (no UI mode)...\n")
+		logger.ProxyCheckStart(len(state.proxies), state.concurrency)
 		state.startCheckingNoUI()
 	} else {
 		// Start the UI
@@ -203,7 +219,7 @@ func main() {
 		}()
 
 		if _, err := program.Run(); err != nil {
-			fmt.Printf("Error running program: %v\n", err)
+			logger.Error("Failed to run TUI program", "error", err)
 			os.Exit(1)
 		}
 	}
@@ -218,43 +234,39 @@ func processResults(state *AppState) {
 	summary := output.GenerateSummary(state.results)
 	outputResults := output.ConvertToOutputFormat(state.results)
 
-	// Display console summary
-	fmt.Printf("\nResults Summary:\n")
-	fmt.Printf("Total proxies: %d\n", summary.TotalProxies)
-	fmt.Printf("Working proxies: %d\n", summary.WorkingProxies)
-	fmt.Printf("Anonymous proxies: %d\n", summary.AnonymousProxies)
-	fmt.Printf("Success rate: %.2f%%\n", summary.SuccessRate)
+	// Log summary statistics
+	state.logger.SummaryStats(summary.TotalProxies, summary.WorkingProxies, summary.AnonymousProxies, summary.SuccessRate)
 
 	// Write output files if specified
 	if state.outputFile != "" {
 		if err := output.WriteTextOutput(state.outputFile, outputResults, summary); err != nil {
-			fmt.Printf("Error writing text output: %v\n", err)
+			state.logger.Error("Failed to write text output", "error", err, "file", state.outputFile)
 		} else {
-			fmt.Printf("Text results saved to: %s\n", state.outputFile)
+			state.logger.ResultsSaved(state.outputFile, "text")
 		}
 	}
 
 	if state.jsonFile != "" {
 		if err := output.WriteJSONOutput(state.jsonFile, summary); err != nil {
-			fmt.Printf("Error writing JSON output: %v\n", err)
+			state.logger.Error("Failed to write JSON output", "error", err, "file", state.jsonFile)
 		} else {
-			fmt.Printf("JSON results saved to: %s\n", state.jsonFile)
+			state.logger.ResultsSaved(state.jsonFile, "json")
 		}
 	}
 
 	if state.workingFile != "" {
 		if err := output.WriteWorkingProxiesOutput(state.workingFile, outputResults); err != nil {
-			fmt.Printf("Error writing working proxies: %v\n", err)
+			state.logger.Error("Failed to write working proxies", "error", err, "file", state.workingFile)
 		} else {
-			fmt.Printf("Working proxies saved to: %s\n", state.workingFile)
+			state.logger.ResultsSaved(state.workingFile, "working_proxies")
 		}
 	}
 
 	if state.anonymousFile != "" {
 		if err := output.WriteAnonymousProxiesOutput(state.anonymousFile, outputResults); err != nil {
-			fmt.Printf("Error writing anonymous proxies: %v\n", err)
+			state.logger.Error("Failed to write anonymous proxies", "error", err, "file", state.anonymousFile)
 		} else {
-			fmt.Printf("Anonymous proxies saved to: %s\n", state.anonymousFile)
+			state.logger.ResultsSaved(state.anonymousFile, "anonymous_proxies")
 		}
 	}
 }
@@ -661,7 +673,7 @@ func (s *AppState) startCheckingNoUI() {
 	var wg sync.WaitGroup
 	proxyChan := make(chan string)
 
-	fmt.Printf("Testing %d proxies with concurrency: %d\n", len(s.proxies), s.concurrency)
+	s.logger.Info("Starting proxy tests", "total", len(s.proxies), "concurrency", s.concurrency)
 
 	// Start workers
 	for i := 0; i < s.concurrency; i++ {
@@ -674,7 +686,7 @@ func (s *AppState) startCheckingNoUI() {
 				select {
 				case <-s.ctx.Done():
 					if s.verbose {
-						fmt.Printf("[Worker %d] Cancelled\n", workerID)
+						s.logger.WithWorker(workerID).Debug("Worker cancelled")
 					}
 					return
 				default:
@@ -682,7 +694,7 @@ func (s *AppState) startCheckingNoUI() {
 				}
 
 				if s.verbose {
-					fmt.Printf("[Worker %d] Testing: %s\n", workerID, proxy)
+					s.logger.WithWorker(workerID).WithProxy(proxy).Debug("Testing proxy")
 				}
 
 				result := s.checker.Check(proxy)
@@ -693,17 +705,10 @@ func (s *AppState) startCheckingNoUI() {
 				s.mutex.Unlock()
 
 				if result.Working {
-					fmt.Printf("[%d/%d] ✅ %s - %.2fs", current, len(s.proxies), proxy, result.Speed.Seconds())
-					if result.IsAnonymous {
-						fmt.Printf(" 🔒")
-					}
-					if result.CloudProvider != "" {
-						fmt.Printf(" ☁️[%s]", result.CloudProvider)
-					}
-					fmt.Printf("\n")
+					s.logger.WithContext("progress", fmt.Sprintf("%d/%d", current, len(s.proxies))).ProxySuccess(proxy, result.Speed.Seconds(), result.IsAnonymous, result.CloudProvider)
 				} else {
 					if s.verbose {
-						fmt.Printf("[%d/%d] ❌ %s - %s\n", current, len(s.proxies), proxy, result.Error)
+						s.logger.WithContext("progress", fmt.Sprintf("%d/%d", current, len(s.proxies))).ProxyFailure(proxy, result.Error)
 					}
 				}
 			}
@@ -714,7 +719,7 @@ func (s *AppState) startCheckingNoUI() {
 	for _, proxy := range s.proxies {
 		select {
 		case <-s.ctx.Done():
-			fmt.Printf("\nShutdown requested, stopping proxy feeding...\n")
+			s.logger.Info("Shutdown requested, stopping proxy feeding")
 			close(proxyChan)
 			return
 		case proxyChan <- proxy:
@@ -726,5 +731,5 @@ func (s *AppState) startCheckingNoUI() {
 	// Wait for all workers to finish
 	wg.Wait()
 	
-	fmt.Printf("\nProxy checking complete!\n")
+	s.logger.ProxyCheckComplete()
 }

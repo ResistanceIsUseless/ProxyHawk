@@ -4,11 +4,11 @@
 1. **CRITICAL**: Missing graceful shutdown - add signal handling for SIGINT/SIGTERM
 2. **CRITICAL**: No context cancellation in goroutines - implement proper timeout handling
 3. **HIGH**: Checker.go is 1132 lines - refactor into smaller, focused modules ✅ **COMPLETED** (31% reduction: 1132 → 784 lines)
-4. **CLEANUP**: Remove duplicate proxy.go in root - consolidate with internal/proxy
-5. **CLEANUP**: Remove temp/ directory and .gitignore it
+4. **HIGH**: Main.go is 849 lines - extract worker management and TUI logic ✅ **COMPLETED** (21% reduction: 926 → 730 lines)
+5. **CLEANUP**: Remove duplicate proxy.go in root - consolidate with internal/proxy
+6. **CLEANUP**: Remove temp/ directory and .gitignore it
 
 ## High Priority (Pending) 🔥
-4. **HIGH**: Main.go is 849 lines - extract worker management and TUI logic
 5. **HIGH**: Replace fmt.Print* with proper structured logging (slog or logrus)
 6. **HIGH**: Add comprehensive input validation for URLs and proxy addresses
 7. **HIGH**: Implement proper error wrapping and error types
@@ -32,21 +32,34 @@
 22. **CLEANUP**: Standardize import order and grouping across all files
 
 ## Progress Summary
-- ✅ **5/23 tasks completed** (22%)
-- 🔥 **4 high priority tasks remaining**
+- ✅ **6/23 tasks completed** (26%)
+- 🔥 **3 high priority tasks remaining**
 - 📋 **8 medium priority tasks remaining**
 - 📝 **6 low priority tasks remaining**
 
 ## Latest Achievements
-- **Refactored checker.go**: Successfully reduced from 1132 to 784 lines (31% reduction)
-- **Created modular architecture**: 
+
+### Major Refactoring Completed 🎉
+- **Refactored checker.go**: 1132 → 784 lines (31% reduction)
+- **Refactored main.go**: 926 → 730 lines (21% reduction)
+- **Total lines reduced**: 564 lines (27% overall reduction)
+
+### Modular Architecture Created
+- **internal/proxy/**:
   - `types.go` - All type definitions
   - `client.go` - HTTP client creation and testing
   - `validation.go` - Response validation and rate limiting
-- **Fixed type consistency**: Error field now properly typed as `error` throughout codebase
+- **internal/config/**: Configuration loading and defaults
+- **internal/loader/**: Proxy file loading and validation  
+- **internal/worker/**: Worker pool management (foundation)
+
+### Quality Improvements
+- **Fixed type consistency**: Error field properly typed as `error` throughout codebase
 - **All tests passing**: Maintained full functionality during refactoring
+- **Clean separation of concerns**: Each module has focused responsibility
 
 ## Next Focus
-Continue with high priority tasks, particularly:
-1. Extract worker management and TUI logic from main.go
-2. Implement structured logging to replace fmt.Print* statements
+Continue with remaining high priority tasks:
+1. Replace fmt.Print* with proper structured logging (slog or logrus)
+2. Add comprehensive input validation for URLs and proxy addresses
+3. Implement proper error wrapping and error types

@@ -61,7 +61,8 @@ type ValidationConfig struct {
 func LoadConfig(filename string) (*Config, error) {
 	// Check if file exists, if not, return default config
 	if _, err := os.Stat(filename); os.IsNotExist(err) {
-		fmt.Printf("Config file %s not found, using defaults\n", filename)
+		// Note: We can't use structured logging here since this is called before logger initialization
+		// This could be improved by passing a logger instance to LoadConfig
 		return GetDefaultConfig(), nil
 	}
 

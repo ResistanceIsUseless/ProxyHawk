@@ -1,81 +1,24 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"flag"
 	"fmt"
-	"net/url"
 	"os"
 	"os/signal"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
 
-	"github.com/ResistanceIsUseless/ProxyHawk/cloudcheck"
+	"github.com/ResistanceIsUseless/ProxyHawk/internal/config"
+	"github.com/ResistanceIsUseless/ProxyHawk/internal/loader"
 	"github.com/ResistanceIsUseless/ProxyHawk/internal/output"
 	"github.com/ResistanceIsUseless/ProxyHawk/internal/proxy"
 	"github.com/ResistanceIsUseless/ProxyHawk/internal/ui"
 	"github.com/charmbracelet/bubbles/progress"
 	tea "github.com/charmbracelet/bubbletea"
-	"gopkg.in/yaml.v3"
 )
 
-// Config represents the application configuration
-type Config struct {
-	// General settings
-	Timeout              int               `yaml:"timeout"`
-	InsecureSkipVerify   bool              `yaml:"insecure_skip_verify"`
-	UserAgent            string            `yaml:"user_agent"`
-	DefaultHeaders       map[string]string `yaml:"default_headers"`
-	EnableCloudChecks    bool              `yaml:"enable_cloud_checks"`
-	EnableAnonymityCheck bool              `yaml:"enable_anonymity_check"`
-	Concurrency          int               `yaml:"concurrency"`
-
-	// Rate limiting settings
-	RateLimitEnabled bool          `yaml:"rate_limit_enabled"`
-	RateLimitDelay   time.Duration `yaml:"rate_limit_delay"`
-	RateLimitPerHost bool          `yaml:"rate_limit_per_host"`
-
-	// Test URLs configuration
-	TestURLs TestURLConfig `yaml:"test_urls"`
-
-	// Validation settings
-	Validation ValidationConfig `yaml:"validation"`
-
-	// Cloud provider settings
-	CloudProviders []cloudcheck.CloudProvider `yaml:"cloud_providers"`
-
-	// Advanced security checks
-	AdvancedChecks proxy.AdvancedChecks `yaml:"advanced_checks"`
-
-	// Response validation settings
-	RequireStatusCode   int      `yaml:"require_status_code"`
-	RequireContentMatch string   `yaml:"require_content_match"`
-	RequireHeaderFields []string `yaml:"require_header_fields"`
-
-	// Interactsh settings
-	InteractshURL   string `yaml:"interactsh_url"`
-	InteractshToken string `yaml:"interactsh_token"`
-}
-
-type TestURLConfig struct {
-	DefaultURL           string    `yaml:"default_url"`
-	RequiredSuccessCount int       `yaml:"required_success_count"`
-	URLs                 []TestURL `yaml:"urls"`
-}
-
-type TestURL struct {
-	URL         string `yaml:"url"`
-	Description string `yaml:"description"`
-	Required    bool   `yaml:"required"`
-}
-
-type ValidationConfig struct {
-	MinResponseBytes   int      `yaml:"min_response_bytes"`
-	DisallowedKeywords []string `yaml:"disallowed_keywords"`
-}
 
 // AppState represents the application state
 type AppState struct {
@@ -131,7 +74,7 @@ func main() {
 	flag.Parse()
 
 	// Load configuration
-	config, err := loadConfig(*configFile)
+	config, err := config.LoadConfig(*configFile)
 	if err != nil {
 		fmt.Printf("Error loading config: %v\n", err)
 		os.Exit(1)
@@ -146,7 +89,7 @@ func main() {
 	}
 
 	// Load proxies
-	proxies, warnings, err := loadProxies(*proxyList)
+	proxies, warnings, err := loader.LoadProxies(*proxyList)
 	if err != nil {
 		fmt.Printf("Error loading proxies: %v\n", err)
 		os.Exit(1)
@@ -269,145 +212,6 @@ func main() {
 	processResults(state)
 }
 
-func loadConfig(filename string) (*Config, error) {
-	// Check if file exists, if not, return default config
-	if _, err := os.Stat(filename); os.IsNotExist(err) {
-		fmt.Printf("Config file %s not found, using defaults\n", filename)
-		return getDefaultConfig(), nil
-	}
-
-	data, err := os.ReadFile(filename)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read config file: %v", err)
-	}
-
-	var config Config
-	if err := yaml.Unmarshal(data, &config); err != nil {
-		return nil, fmt.Errorf("error parsing config file: %v", err)
-	}
-
-	// Set default concurrency if not specified
-	if config.Concurrency <= 0 {
-		config.Concurrency = 10
-	}
-
-	// Merge with defaults for any missing fields
-	defaults := getDefaultConfig()
-	if len(config.DefaultHeaders) == 0 {
-		config.DefaultHeaders = defaults.DefaultHeaders
-	}
-	if config.UserAgent == "" {
-		config.UserAgent = defaults.UserAgent
-	}
-	if len(config.Validation.DisallowedKeywords) == 0 {
-		config.Validation = defaults.Validation
-	}
-	if config.TestURLs.DefaultURL == "" {
-		config.TestURLs.DefaultURL = "https://api.ipify.org?format=json"
-	}
-
-	return &config, nil
-}
-
-func getDefaultConfig() *Config {
-	return &Config{
-		Timeout:              10,
-		InsecureSkipVerify:   false,
-		EnableCloudChecks:    false,
-		EnableAnonymityCheck: false,
-
-		// Default rate limiting settings
-		RateLimitEnabled: false,
-		RateLimitDelay:   1 * time.Second,
-		RateLimitPerHost: true,
-
-		DefaultHeaders: map[string]string{
-			"Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-			"Accept-Language": "en-US,en;q=0.9",
-			"Accept-Encoding": "gzip, deflate",
-			"Connection":      "keep-alive",
-			"Cache-Control":   "no-cache",
-			"Pragma":          "no-cache",
-		},
-		UserAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-		Validation: ValidationConfig{
-			DisallowedKeywords: []string{
-				"Access Denied",
-				"Proxy Error",
-				"Bad Gateway",
-				"Gateway Timeout",
-				"Service Unavailable",
-			},
-			MinResponseBytes: 100,
-		},
-	}
-}
-
-func loadProxies(filename string) ([]string, []string, error) {
-	// Check if file exists
-	if _, err := os.Stat(filename); os.IsNotExist(err) {
-		return nil, nil, fmt.Errorf("proxy file '%s' not found", filename)
-	}
-
-	file, err := os.Open(filename)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to open proxy file: %v", err)
-	}
-	defer file.Close()
-
-	var proxies []string
-	var warnings []string
-	lineCount := 0
-	scanner := bufio.NewScanner(file)
-	
-	for scanner.Scan() {
-		lineCount++
-		line := strings.TrimSpace(scanner.Text())
-		
-		// Skip empty lines and comments
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-
-		// Extract proxy URL (first field if there are multiple)
-		proxy := strings.Fields(line)[0]
-		if proxy == "" {
-			continue
-		}
-
-		// Remove trailing slashes
-		proxy = strings.TrimRight(proxy, "/")
-
-		// Add scheme if missing
-		if !strings.Contains(proxy, "://") {
-			proxy = "http://" + proxy
-		}
-
-		// Validate URL
-		if _, err := url.Parse(proxy); err != nil {
-			warnings = append(warnings, fmt.Sprintf("Line %d: Invalid proxy URL '%s': %v", lineCount, proxy, err))
-			continue
-		}
-
-		proxies = append(proxies, proxy)
-	}
-
-	// Check for scanner errors
-	if err := scanner.Err(); err != nil {
-		return nil, warnings, fmt.Errorf("error reading proxy file: %v", err)
-	}
-
-	// Check if file was empty or had no valid proxies
-	if len(proxies) == 0 {
-		if lineCount == 0 {
-			return nil, warnings, fmt.Errorf("proxy file '%s' is empty", filename)
-		} else {
-			return nil, warnings, fmt.Errorf("no valid proxies found in '%s' (found %d lines, %d warnings)", filename, lineCount, len(warnings))
-		}
-	}
-
-	return proxies, warnings, nil
-}
 
 func processResults(state *AppState) {
 	// Generate summary

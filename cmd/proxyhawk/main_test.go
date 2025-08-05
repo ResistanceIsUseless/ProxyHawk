@@ -4,18 +4,21 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/ResistanceIsUseless/ProxyHawk/internal/config"
+	"github.com/ResistanceIsUseless/ProxyHawk/internal/loader"
 )
 
 func TestLoadConfig(t *testing.T) {
 	// Test loading default config when file doesn't exist
-	config, err := loadConfig("nonexistent.yaml")
+	cfg, err := config.LoadConfig("nonexistent.yaml")
 	if err != nil {
 		t.Errorf("loadConfig() error = %v", err)
 	}
-	if config == nil {
+	if cfg == nil {
 		t.Error("loadConfig() returned nil config")
 	}
-	if len(config.DefaultHeaders) == 0 {
+	if len(cfg.DefaultHeaders) == 0 {
 		t.Error("loadConfig() returned empty default headers")
 	}
 
@@ -38,15 +41,15 @@ validation:
 		t.Fatalf("Failed to create test config file: %v", err)
 	}
 
-	config, err = loadConfig(tempFile)
+	cfg2, err := config.LoadConfig(tempFile)
 	if err != nil {
 		t.Errorf("loadConfig() error = %v", err)
 	}
-	if config.Timeout != 30 {
-		t.Errorf("loadConfig() got timeout = %v, want %v", config.Timeout, 30)
+	if cfg2.Timeout != 30 {
+		t.Errorf("loadConfig() got timeout = %v, want %v", cfg2.Timeout, 30)
 	}
-	if config.UserAgent != "Test Agent" {
-		t.Errorf("loadConfig() got user agent = %v, want %v", config.UserAgent, "Test Agent")
+	if cfg2.UserAgent != "Test Agent" {
+		t.Errorf("loadConfig() got user agent = %v, want %v", cfg2.UserAgent, "Test Agent")
 	}
 }
 
@@ -63,7 +66,7 @@ socks5://socks.example.com:1080
 		t.Fatalf("Failed to create test proxies file: %v", err)
 	}
 
-	proxies, warnings, err := loadProxies(tempFile)
+	proxies, warnings, err := loader.LoadProxies(tempFile)
 	if err != nil {
 		t.Errorf("loadProxies() error = %v", err)
 	}
@@ -85,14 +88,14 @@ socks5://socks.example.com:1080
 		t.Fatalf("Failed to create empty file: %v", err)
 	}
 
-	_, _, err = loadProxies(emptyFile)
+	_, _, err = loader.LoadProxies(emptyFile)
 	if err == nil {
 		t.Error("loadProxies() expected error for empty file")
 	}
 }
 
 func TestGetDefaultConfig(t *testing.T) {
-	config := getDefaultConfig()
+	cfg := config.GetDefaultConfig()
 
 	// Check required default headers
 	requiredHeaders := []string{
@@ -105,21 +108,21 @@ func TestGetDefaultConfig(t *testing.T) {
 	}
 
 	for _, header := range requiredHeaders {
-		if _, ok := config.DefaultHeaders[header]; !ok {
+		if _, ok := cfg.DefaultHeaders[header]; !ok {
 			t.Errorf("getDefaultConfig() missing required header %s", header)
 		}
 	}
 
 	// Check User-Agent
-	if config.UserAgent == "" {
+	if cfg.UserAgent == "" {
 		t.Error("getDefaultConfig() returned empty User-Agent")
 	}
 
 	// Check validation settings
-	if len(config.Validation.DisallowedKeywords) == 0 {
+	if len(cfg.Validation.DisallowedKeywords) == 0 {
 		t.Error("getDefaultConfig() returned empty DisallowedKeywords")
 	}
-	if config.Validation.MinResponseBytes <= 0 {
+	if cfg.Validation.MinResponseBytes <= 0 {
 		t.Error("getDefaultConfig() returned invalid MinResponseBytes")
 	}
 }

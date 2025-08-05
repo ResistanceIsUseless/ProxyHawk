@@ -59,6 +59,14 @@ make docker-run    # Run in container
 - Detailed timing and performance metrics
 - Multiple output formats (text, JSON, working proxies only)
 
+### Proxy Discovery & Intelligence
+- **Shodan Integration**: Discover proxies using Shodan's comprehensive database
+- **Smart Filtering**: Filter by country, confidence score, proxy type, and more
+- **Intelligent Scoring**: Advanced scoring system based on multiple factors
+- **Auto-Validation**: Automatically test discovered candidates
+- **Deduplication**: Remove duplicate candidates across sources
+- **Preset Queries**: Built-in search queries for different proxy types
+
 ### Security Testing & Validation
 - **SSRF Detection**: Tests access to cloud metadata services (AWS, GCP, Azure), internal networks (RFC 1918, RFC 6598, RFC 3927), and localhost variants
 - **Host Header Injection**: Advanced testing with multiple injection vectors including X-Forwarded-Host, X-Real-IP, malformed headers, and HTTP/1.0 bypasses
@@ -83,9 +91,10 @@ The application uses a YAML configuration file (default: `config.yaml`) to defin
 - Cloud provider definitions and metadata service endpoints
 - Default HTTP headers and User-Agent settings
 - Response validation rules and content matching
-- Advanced security check configurations (SSRF, host header injection, protocol smuggling)
+- Advanced security check configurations (SSRF, host header injection, protocol smuggling)  
 - Internal network ranges and reserved IP blocks
 - Rate limiting and timeout settings
+- Proxy discovery API credentials and filtering options
 
 Example configuration:
 ```yaml
@@ -102,6 +111,15 @@ cloud_providers:
     org_names:
       - "AMAZON"
       - "AWS"
+
+# Discovery configuration
+discovery:
+  shodan_api_key: "YOUR_SHODAN_API_KEY"
+  max_results: 1000
+  countries: ["US", "GB", "DE", "NL"]
+  min_confidence: 0.3
+  exclude_malicious: true
+  deduplicate: true
 ```
 
 You can specify a custom configuration file using the `-config` flag.
@@ -156,6 +174,15 @@ Rate Limiting:
 Protocol Support:
 - -http2: Enable HTTP/2 protocol detection and support
 - -http3: Enable HTTP/3 protocol detection and support (experimental)
+
+Discovery Options:
+- -discover: Enable discovery mode to find proxy candidates
+- -discover-source: Discovery source to use (shodan, all) (default: all)
+- -discover-query: Custom discovery query (uses preset if empty)
+- -discover-limit: Maximum number of candidates to discover (default: 100)
+- -discover-validate: Validate discovered candidates immediately
+- -discover-countries: Comma-separated list of country codes to target
+- -discover-min-confidence: Minimum confidence score for candidates
 ```
 ### Example Commands
 
@@ -222,6 +249,28 @@ Check proxies with rate limiting to avoid IP bans:
 Test proxies with HTTP/2 and HTTP/3 support:
 ```bash
 ./proxyhawk -l proxies.txt -http2 -http3 -v
+```
+
+### Discovery Mode Examples
+
+Discover proxies using Shodan (requires API key):
+```bash
+./proxyhawk -discover -discover-source shodan -discover-limit 50
+```
+
+Discover and validate proxies from specific countries:
+```bash
+./proxyhawk -discover -discover-countries "US,GB,DE" -discover-validate -o discovered.txt
+```
+
+Custom discovery query with confidence filtering:
+```bash
+./proxyhawk -discover -discover-query "squid proxy" -discover-min-confidence 0.7 -j results.json
+```
+
+Discover high-quality proxies and save working ones:
+```bash
+./proxyhawk -discover -discover-limit 200 -discover-validate -wp working-discovered.txt -v
 ```
 
 ### Output Formats

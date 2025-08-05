@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -14,6 +16,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/ResistanceIsUseless/ProxyHawk/internal/config"
+	"github.com/ResistanceIsUseless/ProxyHawk/internal/discovery"
 	"github.com/ResistanceIsUseless/ProxyHawk/internal/errors"
 	"github.com/ResistanceIsUseless/ProxyHawk/internal/help"
 	"github.com/ResistanceIsUseless/ProxyHawk/internal/loader"
@@ -103,6 +106,15 @@ func main() {
 	enableHTTP2 := flag.Bool("http2", false, "Enable HTTP/2 protocol detection and support")
 	enableHTTP3 := flag.Bool("http3", false, "Enable HTTP/3 protocol detection and support")
 
+	// Discovery flags
+	discoverMode := flag.Bool("discover", false, "Enable discovery mode to find proxy candidates")
+	discoverSource := flag.String("discover-source", "all", "Discovery source to use (shodan, all)")
+	discoverQuery := flag.String("discover-query", "", "Custom discovery query (uses preset if empty)")
+	discoverLimit := flag.Int("discover-limit", 100, "Maximum number of candidates to discover")
+	discoverValidate := flag.Bool("discover-validate", false, "Validate discovered candidates immediately")
+	discoverCountries := flag.String("discover-countries", "", "Comma-separated list of country codes to target")
+	discoverMinConfidence := flag.Float64("discover-min-confidence", 0.0, "Minimum confidence score for candidates")
+
 	// Help and version flags
 	showHelp := flag.Bool("help", false, "Show help message")
 	showHelpShort := flag.Bool("h", false, "Show help message (short)")
@@ -135,9 +147,9 @@ func main() {
 		os.Exit(0)
 	}
 
-	// Validate required flags
-	if *proxyList == "" {
-		help.PrintUsageError(os.Stderr, fmt.Errorf("proxy list file is required"), noColor)
+	// Validate required flags - proxy list is required unless in discovery mode
+	if *proxyList == "" && !*discoverMode {
+		help.PrintUsageError(os.Stderr, fmt.Errorf("proxy list file is required (or use -discover mode)"), noColor)
 		os.Exit(1)
 	}
 
@@ -237,6 +249,20 @@ func main() {
 	}
 	if *enableHTTP3 {
 		cfg.EnableHTTP3 = true
+	}
+
+	// Override discovery settings with CLI flags
+	if *discoverCountries != "" {
+		cfg.Discovery.Countries = strings.Split(*discoverCountries, ",")
+	}
+	if *discoverMinConfidence > 0 {
+		cfg.Discovery.MinConfidence = *discoverMinConfidence
+	}
+
+	// Handle discovery mode
+	if *discoverMode {
+		runDiscoveryMode(cfg, logger, *discoverSource, *discoverQuery, *discoverLimit, *discoverValidate, *outputFile, *jsonFile)
+		return
 	}
 
 	// Load proxies
@@ -1025,4 +1051,237 @@ func (s *AppState) startCheckingNoUI() {
 	}
 
 	s.logger.ProxyCheckComplete()
+}
+
+// runDiscoveryMode handles the proxy discovery workflow
+func runDiscoveryMode(cfg *config.Config, logger *logging.Logger, source, query string, limit int, validate bool, outputFile, jsonFile string) {
+	logger.Info("Starting proxy discovery mode",
+		"source", source,
+		"query", query,
+		"limit", limit,
+		"validate", validate)
+
+	// Create discovery manager
+	manager := discovery.NewManager(cfg.Discovery, logger)
+
+	// Check available sources
+	availableSources := manager.GetAvailableSources()
+	if len(availableSources) == 0 {
+		logger.Error("No discovery sources configured",
+			"required", "shodan_api_key in config file or SHODAN_API_KEY environment variable")
+		fmt.Fprintf(os.Stderr, "Error: No discovery sources configured.\n")
+		fmt.Fprintf(os.Stderr, "Please add your Shodan API key to the config file or set SHODAN_API_KEY environment variable.\n")
+		os.Exit(1)
+	}
+
+	logger.Info("Available discovery sources", "sources", availableSources)
+
+	// Use default query if none provided
+	if query == "" {
+		presets := manager.GetPresetQueries()
+		if sourceQueries, exists := presets[source]; exists && len(sourceQueries) > 0 {
+			query = sourceQueries[0] // Use first preset query
+			logger.Info("Using preset query", "query", query)
+		} else {
+			query = "proxy server" // Fallback
+			logger.Info("Using fallback query", "query", query)
+		}
+	}
+
+	// Execute discovery
+	var result *discovery.DiscoveryResult
+	var err error
+
+	if source == "all" {
+		result, err = manager.SearchAll(query, limit)
+	} else {
+		result, err = manager.SearchSource(source, query, limit)
+	}
+
+	if err != nil {
+		logger.Error("Discovery failed", "error", err)
+		fmt.Fprintf(os.Stderr, "Discovery failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Display discovery results
+	logger.Info("Discovery completed",
+		"candidates_found", len(result.Candidates),
+		"duration", result.Duration,
+		"source", result.Source)
+
+	fmt.Printf("\n🔍 Discovery Results\n")
+	fmt.Printf("====================\n")
+	fmt.Printf("Query: %s\n", result.Query)
+	fmt.Printf("Source: %s\n", result.Source)
+	fmt.Printf("Duration: %v\n", result.Duration)
+	fmt.Printf("Candidates found: %d\n", len(result.Candidates))
+	
+	if len(result.Errors) > 0 {
+		fmt.Printf("Errors: %d\n", len(result.Errors))
+		for _, errMsg := range result.Errors {
+			fmt.Printf("  - %s\n", errMsg)
+		}
+	}
+	fmt.Printf("\n")
+
+	if len(result.Candidates) == 0 {
+		fmt.Printf("No proxy candidates found. Try adjusting your search query or filters.\n")
+		return
+	}
+
+	// Show top candidates
+	fmt.Printf("🎯 Top Candidates (by confidence):\n")
+	fmt.Printf("===================================\n")
+	showLimit := 10
+	if len(result.Candidates) < showLimit {
+		showLimit = len(result.Candidates)
+	}
+
+	for i, candidate := range result.Candidates[:showLimit] {
+		fmt.Printf("%d. %s:%d (%s) - Confidence: %.2f\n",
+			i+1, candidate.IP, candidate.Port, candidate.Protocol, candidate.Confidence)
+		if candidate.Country != "" {
+			fmt.Printf("   Location: %s", candidate.Country)
+			if candidate.City != "" {
+				fmt.Printf(", %s", candidate.City)
+			}
+			fmt.Printf("\n")
+		}
+		if candidate.ProxyType != "" && candidate.ProxyType != "unknown" {
+			fmt.Printf("   Type: %s\n", candidate.ProxyType)
+		}
+		if candidate.ServerHeader != "" {
+			fmt.Printf("   Server: %s\n", candidate.ServerHeader)
+		}
+		fmt.Printf("\n")
+	}
+
+	// Validate candidates if requested
+	if validate {
+		fmt.Printf("🧪 Validating discovered candidates...\n")
+		fmt.Printf("=====================================\n")
+		
+		// Convert candidates to proxy URLs for validation
+		proxyURLs := make([]string, len(result.Candidates))
+		for i, candidate := range result.Candidates {
+			proxyURLs[i] = fmt.Sprintf("%s://%s:%d", candidate.Protocol, candidate.IP, candidate.Port)
+		}
+
+		// Create proxy checker
+		poolConfig := pool.Config{
+			MaxIdleConns:          cfg.ConnectionPool.MaxIdleConns,
+			MaxIdleConnsPerHost:   cfg.ConnectionPool.MaxIdleConnsPerHost,
+			MaxConnsPerHost:       cfg.ConnectionPool.MaxConnsPerHost,
+			IdleConnTimeout:       cfg.ConnectionPool.IdleConnTimeout,
+			KeepAliveTimeout:      cfg.ConnectionPool.KeepAliveTimeout,
+			TLSHandshakeTimeout:   cfg.ConnectionPool.TLSHandshakeTimeout,
+			ExpectContinueTimeout: cfg.ConnectionPool.ExpectContinueTimeout,
+			DisableKeepAlives:     cfg.ConnectionPool.DisableKeepAlives,
+			DisableCompression:    cfg.ConnectionPool.DisableCompression,
+			InsecureSkipVerify:    cfg.InsecureSkipVerify,
+		}
+		connectionPool := pool.NewConnectionPool(poolConfig)
+
+		checker := proxy.NewChecker(proxy.Config{
+			Timeout:             time.Duration(cfg.Timeout) * time.Second,
+			ValidationURL:       cfg.TestURLs.DefaultURL,
+			DisallowedKeywords:  cfg.Validation.DisallowedKeywords,
+			MinResponseBytes:    cfg.Validation.MinResponseBytes,
+			DefaultHeaders:      cfg.DefaultHeaders,
+			UserAgent:           cfg.UserAgent,
+			ConnectionPool:      connectionPool,
+		}, false) // Don't use debug mode for validation
+
+		// Validate proxies concurrently
+		workingCandidates := make([]*discovery.ProxyCandidate, 0)
+		
+		// Simple validation - test a few candidates
+		testLimit := 20
+		if len(result.Candidates) < testLimit {
+			testLimit = len(result.Candidates)
+		}
+
+		fmt.Printf("Testing top %d candidates...\n\n", testLimit)
+		
+		for i, candidate := range result.Candidates[:testLimit] {
+			proxyURL := fmt.Sprintf("%s://%s:%d", candidate.Protocol, candidate.IP, candidate.Port)
+			
+			fmt.Printf("Testing %d/%d: %s... ", i+1, testLimit, proxyURL)
+			
+			proxyResult := checker.Check(proxyURL)
+			if proxyResult.Working {
+				fmt.Printf("✅ Working (%.2fs)\n", proxyResult.Speed.Seconds())
+				workingCandidates = append(workingCandidates, &candidate)
+			} else {
+				fmt.Printf("❌ Failed\n")
+			}
+		}
+
+		fmt.Printf("\n✅ Validation Summary:\n")
+		fmt.Printf("Tested: %d\n", testLimit)
+		fmt.Printf("Working: %d\n", len(workingCandidates))
+		fmt.Printf("Success Rate: %.1f%%\n", float64(len(workingCandidates))/float64(testLimit)*100)
+	}
+
+	// Save results to files if requested
+	if outputFile != "" {
+		err := saveCandidatesToText(result.Candidates, outputFile)
+		if err != nil {
+			logger.Error("Failed to save text output", "error", err, "file", outputFile)
+		} else {
+			logger.Info("Candidates saved to text file", "file", outputFile, "count", len(result.Candidates))
+			fmt.Printf("📝 Candidates saved to: %s\n", outputFile)
+		}
+	}
+
+	if jsonFile != "" {
+		err := saveCandidatesToJSON(result, jsonFile)
+		if err != nil {
+			logger.Error("Failed to save JSON output", "error", err, "file", jsonFile)
+		} else {
+			logger.Info("Discovery result saved to JSON file", "file", jsonFile)
+			fmt.Printf("💾 Full results saved to: %s\n", jsonFile)
+		}
+	}
+
+	fmt.Printf("\n🎉 Discovery completed successfully!\n")
+}
+
+// saveCandidatesToText saves discovery candidates to a text file
+func saveCandidatesToText(candidates []discovery.ProxyCandidate, filename string) error {
+	file, err := os.Create(filename)
+	if err != nil {
+		return fmt.Errorf("failed to create file: %w", err)
+	}
+	defer file.Close()
+
+	fmt.Fprintf(file, "# ProxyHawk Discovery Results\n")
+	fmt.Fprintf(file, "# Generated: %s\n", time.Now().Format(time.RFC3339))
+	fmt.Fprintf(file, "# Total candidates: %d\n\n", len(candidates))
+
+	for _, candidate := range candidates {
+		// Write in format: protocol://ip:port
+		fmt.Fprintf(file, "%s://%s:%d\n", candidate.Protocol, candidate.IP, candidate.Port)
+	}
+
+	return nil
+}
+
+// saveCandidatesToJSON saves the full discovery result to a JSON file
+func saveCandidatesToJSON(result *discovery.DiscoveryResult, filename string) error {
+	file, err := os.Create(filename)
+	if err != nil {
+		return fmt.Errorf("failed to create file: %w", err)
+	}
+	defer file.Close()
+
+	encoder := json.NewEncoder(file)
+	encoder.SetIndent("", "  ")
+	
+	if err := encoder.Encode(result); err != nil {
+		return fmt.Errorf("failed to encode JSON: %w", err)
+	}
+
+	return nil
 }

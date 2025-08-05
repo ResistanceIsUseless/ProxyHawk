@@ -1,0 +1,69 @@
+# ProxyHawk Discovery Configuration Example
+# This configuration shows how to set up proxy discovery with Shodan
+
+# Basic settings
+timeout: 10
+insecure_skip_verify: false
+concurrency: 10
+
+# Discovery settings
+discovery:
+  # API credentials (set these with your actual keys)
+  shodan_api_key: "YOUR_SHODAN_API_KEY_HERE"
+  # censys_api_key: "YOUR_CENSYS_API_KEY_HERE" 
+  # censys_secret: "YOUR_CENSYS_SECRET_HERE"
+
+  # Search parameters
+  max_results: 1000          # Maximum candidates to discover per search
+  countries: ["US", "GB", "DE", "NL", "FR", "CA", "AU"]  # Target countries (empty = all)
+  min_confidence: 0.3        # Minimum confidence score (0.0-1.0)
+  timeout: 30                # Request timeout in seconds
+  rate_limit: 60             # Requests per minute
+
+  # Filtering options
+  exclude_residential: true   # Exclude residential IP ranges
+  exclude_cdn: true          # Exclude CDN/cloud provider IPs
+  exclude_malicious: true    # Exclude known malicious IPs
+  required_ports: []         # Specific ports to target (empty = all ports)
+  excluded_asns: []          # ASNs to exclude
+
+  # Output options
+  output_format: "json"      # json, csv, txt
+  deduplicate: true          # Remove duplicate candidates
+
+# Default headers for proxy testing
+default_headers:
+  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+  Accept-Language: "en-US,en;q=0.9"
+  Accept-Encoding: "gzip, deflate"
+  Connection: "keep-alive"
+  Cache-Control: "no-cache"
+
+# User agent for requests
+user_agent: "ProxyHawk/2.0 (Proxy Discovery Mode)"
+
+# Test URLs
+test_urls:
+  default_url: "https://api.ipify.org?format=json"
+
+# Validation settings
+validation:
+  disallowed_keywords:
+    - "Access Denied"
+    - "Proxy Error"
+    - "Bad Gateway"
+    - "Gateway Timeout"
+  min_response_bytes: 10
+
+# Connection pool settings for validation
+connection_pool:
+  max_idle_conns: 100
+  max_idle_conns_per_host: 10
+  max_conns_per_host: 50
+  idle_conn_timeout: "90s"
+  keep_alive_timeout: "30s"
+  tls_handshake_timeout: "10s"
+
+# HTTP/2 and HTTP/3 support
+enable_http2: true
+enable_http3: false

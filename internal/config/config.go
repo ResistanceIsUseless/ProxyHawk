@@ -63,6 +63,9 @@ type Config struct {
 	// HTTP/2 and HTTP/3 settings
 	EnableHTTP2 bool `yaml:"enable_http2"`
 	EnableHTTP3 bool `yaml:"enable_http3"`
+
+	// Discovery settings
+	Discovery DiscoveryConfig `yaml:"discovery"`
 }
 
 // TestURLConfig contains configuration for test URLs
@@ -101,6 +104,32 @@ type ConnectionPoolConfig struct {
 	ExpectContinueTimeout time.Duration `yaml:"expect_continue_timeout"`
 	DisableKeepAlives     bool          `yaml:"disable_keep_alives"`
 	DisableCompression    bool          `yaml:"disable_compression"`
+}
+
+// DiscoveryConfig holds configuration for proxy discovery
+type DiscoveryConfig struct {
+	// API credentials
+	ShodanAPIKey string `yaml:"shodan_api_key"`
+	CensysAPIKey string `yaml:"censys_api_key"`
+	CensysSecret string `yaml:"censys_secret"`
+
+	// Search parameters
+	MaxResults      int      `yaml:"max_results"`
+	Countries       []string `yaml:"countries"`
+	MinConfidence   float64  `yaml:"min_confidence"`
+	Timeout         int      `yaml:"timeout"`
+	RateLimit       int      `yaml:"rate_limit"` // requests per minute
+	
+	// Filtering
+	ExcludeResidential bool     `yaml:"exclude_residential"`
+	ExcludeCDN         bool     `yaml:"exclude_cdn"`
+	ExcludeMalicious   bool     `yaml:"exclude_malicious"`
+	RequiredPorts      []int    `yaml:"required_ports"`
+	ExcludedASNs       []string `yaml:"excluded_asns"`
+
+	// Output options
+	OutputFormat string `yaml:"output_format"` // json, csv, txt
+	Deduplicate  bool   `yaml:"deduplicate"`
 }
 
 // LoadConfig loads configuration from a YAML file
@@ -226,5 +255,21 @@ func GetDefaultConfig() *Config {
 		// HTTP/2 and HTTP/3 settings
 		EnableHTTP2: true,  // Enable HTTP/2 by default
 		EnableHTTP3: false, // Disable HTTP/3 by default (requires additional dependencies)
+
+		// Discovery settings
+		Discovery: DiscoveryConfig{
+			MaxResults:         1000,
+			Countries:          []string{}, // Empty means all countries
+			MinConfidence:      0.3,
+			Timeout:            30,
+			RateLimit:          60, // 60 requests per minute
+			ExcludeResidential: true,
+			ExcludeCDN:         true,
+			ExcludeMalicious:   true,
+			RequiredPorts:      []int{}, // Empty means all ports
+			ExcludedASNs:       []string{},
+			OutputFormat:       "json",
+			Deduplicate:        true,
+		},
 	}
 }

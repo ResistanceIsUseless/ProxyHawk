@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ResistanceIsUseless/ProxyHawk/cloudcheck"
+	"github.com/ResistanceIsUseless/ProxyHawk/internal/output"
 	"github.com/ResistanceIsUseless/ProxyHawk/internal/proxy"
 	"github.com/ResistanceIsUseless/ProxyHawk/internal/ui"
 	"github.com/charmbracelet/bubbles/progress"
@@ -75,15 +76,22 @@ type ValidationConfig struct {
 
 // AppState represents the application state
 type AppState struct {
-	view        *ui.View
-	checker     *proxy.Checker
-	proxies     []string
-	results     []*proxy.ProxyResult
-	concurrency int
-	verbose     bool
-	debug       bool
-	mutex       sync.Mutex   // Mutex to protect shared state
-	updateChan  chan tea.Msg // Channel for sending updates to the UI
+	view          *ui.View
+	checker       *proxy.Checker
+	proxies       []string
+	results       []*proxy.ProxyResult
+	concurrency   int
+	verbose       bool
+	debug         bool
+	mutex         sync.Mutex   // Mutex to protect shared state
+	updateChan    chan tea.Msg // Channel for sending updates to the UI
+	
+	// Output options
+	outputFile    string
+	jsonFile      string
+	workingFile   string
+	anonymousFile string
+	noUI          bool
 }
 
 // Define custom message types
@@ -93,7 +101,7 @@ type progressUpdateMsg struct{}
 func main() {
 	// Parse command line flags
 	proxyList := flag.String("l", "", "File containing list of proxies")
-	configFile := flag.String("config", "config.yaml", "Path to config file")
+	configFile := flag.String("config", "config/default.yaml", "Path to config file")
 	verbose := flag.Bool("v", false, "Enable verbose output")
 	debug := flag.Bool("d", false, "Enable debug mode")
 	concurrency := flag.Int("c", 0, "Number of concurrent checks (overrides config)")
@@ -104,6 +112,13 @@ func main() {
 	rateLimitEnabled := flag.Bool("rate-limit", false, "Enable rate limiting")
 	rateLimitDelay := flag.Duration("rate-delay", 1*time.Second, "Delay between requests (e.g. 500ms, 1s, 2s)")
 	rateLimitPerHost := flag.Bool("rate-per-host", true, "Apply rate limiting per host instead of globally")
+
+	// Output flags
+	outputFile := flag.String("o", "", "Output results to text file")
+	jsonFile := flag.String("j", "", "Output results to JSON file")
+	workingFile := flag.String("wp", "", "Output working proxies to file")
+	anonymousFile := flag.String("wpa", "", "Output working anonymous proxies to file")
+	noUI := flag.Bool("no-ui", false, "Disable terminal UI (for automation/scripting)")
 
 	flag.Parse()
 
@@ -126,6 +141,12 @@ func main() {
 	proxies, warnings, err := loadProxies(*proxyList)
 	if err != nil {
 		fmt.Printf("Error loading proxies: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Check if we have any proxies to work with
+	if len(proxies) == 0 {
+		fmt.Println("Error: No valid proxies found to check. Please provide a file with valid proxy entries.")
 		os.Exit(1)
 	}
 
@@ -175,28 +196,39 @@ func main() {
 
 	// Create application state
 	state := &AppState{
-		view:        view,
-		checker:     checker,
-		proxies:     proxies,
-		concurrency: config.Concurrency,
-		verbose:     *verbose, // Only use verbose flag
-		debug:       *debug || config.AdvancedChecks.TestProtocolSmuggling || config.AdvancedChecks.TestDNSRebinding,
-		updateChan:  make(chan tea.Msg, 100), // Buffer for update messages
+		view:          view,
+		checker:       checker,
+		proxies:       proxies,
+		concurrency:   config.Concurrency,
+		verbose:       *verbose, // Only use verbose flag
+		debug:         *debug || config.AdvancedChecks.TestProtocolSmuggling || config.AdvancedChecks.TestDNSRebinding,
+		updateChan:    make(chan tea.Msg, 100), // Buffer for update messages
+		outputFile:    *outputFile,
+		jsonFile:      *jsonFile,
+		workingFile:   *workingFile,
+		anonymousFile: *anonymousFile,
+		noUI:          *noUI,
 	}
 
-	// Start the UI
-	program := tea.NewProgram(state)
+	if state.noUI {
+		// Run without UI
+		fmt.Printf("Starting proxy checks (no UI mode)...\n")
+		state.startCheckingNoUI()
+	} else {
+		// Start the UI
+		program := tea.NewProgram(state)
 
-	// Start a goroutine to forward messages from updateChan to the program
-	go func() {
-		for msg := range state.updateChan {
-			program.Send(msg)
+		// Start a goroutine to forward messages from updateChan to the program
+		go func() {
+			for msg := range state.updateChan {
+				program.Send(msg)
+			}
+		}()
+
+		if _, err := program.Run(); err != nil {
+			fmt.Printf("Error running program: %v\n", err)
+			os.Exit(1)
 		}
-	}()
-
-	if _, err := program.Run(); err != nil {
-		fmt.Printf("Error running program: %v\n", err)
-		os.Exit(1)
 	}
 
 	// Process results
@@ -204,6 +236,12 @@ func main() {
 }
 
 func loadConfig(filename string) (*Config, error) {
+	// Check if file exists, if not, return default config
+	if _, err := os.Stat(filename); os.IsNotExist(err) {
+		fmt.Printf("Config file %s not found, using defaults\n", filename)
+		return getDefaultConfig(), nil
+	}
+
 	data, err := os.ReadFile(filename)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config file: %v", err)
@@ -217,6 +255,21 @@ func loadConfig(filename string) (*Config, error) {
 	// Set default concurrency if not specified
 	if config.Concurrency <= 0 {
 		config.Concurrency = 10
+	}
+
+	// Merge with defaults for any missing fields
+	defaults := getDefaultConfig()
+	if len(config.DefaultHeaders) == 0 {
+		config.DefaultHeaders = defaults.DefaultHeaders
+	}
+	if config.UserAgent == "" {
+		config.UserAgent = defaults.UserAgent
+	}
+	if len(config.Validation.DisallowedKeywords) == 0 {
+		config.Validation = defaults.Validation
+	}
+	if config.TestURLs.DefaultURL == "" {
+		config.TestURLs.DefaultURL = "https://api.ipify.org?format=json"
 	}
 
 	return &config, nil
@@ -257,17 +310,33 @@ func getDefaultConfig() *Config {
 }
 
 func loadProxies(filename string) ([]string, []string, error) {
+	// Check if file exists
+	if _, err := os.Stat(filename); os.IsNotExist(err) {
+		return nil, nil, fmt.Errorf("proxy file '%s' not found", filename)
+	}
+
 	file, err := os.Open(filename)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("failed to open proxy file: %v", err)
 	}
 	defer file.Close()
 
 	var proxies []string
 	var warnings []string
+	lineCount := 0
 	scanner := bufio.NewScanner(file)
+	
 	for scanner.Scan() {
-		proxy := strings.TrimSpace(scanner.Text())
+		lineCount++
+		line := strings.TrimSpace(scanner.Text())
+		
+		// Skip empty lines and comments
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		// Extract proxy URL (first field if there are multiple)
+		proxy := strings.Fields(line)[0]
 		if proxy == "" {
 			continue
 		}
@@ -282,36 +351,74 @@ func loadProxies(filename string) ([]string, []string, error) {
 
 		// Validate URL
 		if _, err := url.Parse(proxy); err != nil {
-			warnings = append(warnings, fmt.Sprintf("Invalid proxy URL '%s': %v", proxy, err))
+			warnings = append(warnings, fmt.Sprintf("Line %d: Invalid proxy URL '%s': %v", lineCount, proxy, err))
 			continue
 		}
 
 		proxies = append(proxies, proxy)
 	}
 
-	if len(proxies) == 0 {
-		return nil, warnings, fmt.Errorf("no valid proxies found in file")
+	// Check for scanner errors
+	if err := scanner.Err(); err != nil {
+		return nil, warnings, fmt.Errorf("error reading proxy file: %v", err)
 	}
 
-	return proxies, warnings, scanner.Err()
-}
-
-func processResults(state *AppState) {
-	// Process and display final results
-	var working, anonymous int
-	for _, result := range state.results {
-		if result.Working {
-			working++
-			if result.IsAnonymous {
-				anonymous++
-			}
+	// Check if file was empty or had no valid proxies
+	if len(proxies) == 0 {
+		if lineCount == 0 {
+			return nil, warnings, fmt.Errorf("proxy file '%s' is empty", filename)
+		} else {
+			return nil, warnings, fmt.Errorf("no valid proxies found in '%s' (found %d lines, %d warnings)", filename, lineCount, len(warnings))
 		}
 	}
 
+	return proxies, warnings, nil
+}
+
+func processResults(state *AppState) {
+	// Generate summary
+	summary := output.GenerateSummary(state.results)
+	outputResults := output.ConvertToOutputFormat(state.results)
+
+	// Display console summary
 	fmt.Printf("\nResults Summary:\n")
-	fmt.Printf("Total proxies: %d\n", len(state.proxies))
-	fmt.Printf("Working proxies: %d\n", working)
-	fmt.Printf("Anonymous proxies: %d\n", anonymous)
+	fmt.Printf("Total proxies: %d\n", summary.TotalProxies)
+	fmt.Printf("Working proxies: %d\n", summary.WorkingProxies)
+	fmt.Printf("Anonymous proxies: %d\n", summary.AnonymousProxies)
+	fmt.Printf("Success rate: %.2f%%\n", summary.SuccessRate)
+
+	// Write output files if specified
+	if state.outputFile != "" {
+		if err := output.WriteTextOutput(state.outputFile, outputResults, summary); err != nil {
+			fmt.Printf("Error writing text output: %v\n", err)
+		} else {
+			fmt.Printf("Text results saved to: %s\n", state.outputFile)
+		}
+	}
+
+	if state.jsonFile != "" {
+		if err := output.WriteJSONOutput(state.jsonFile, summary); err != nil {
+			fmt.Printf("Error writing JSON output: %v\n", err)
+		} else {
+			fmt.Printf("JSON results saved to: %s\n", state.jsonFile)
+		}
+	}
+
+	if state.workingFile != "" {
+		if err := output.WriteWorkingProxiesOutput(state.workingFile, outputResults); err != nil {
+			fmt.Printf("Error writing working proxies: %v\n", err)
+		} else {
+			fmt.Printf("Working proxies saved to: %s\n", state.workingFile)
+		}
+	}
+
+	if state.anonymousFile != "" {
+		if err := output.WriteAnonymousProxiesOutput(state.anonymousFile, outputResults); err != nil {
+			fmt.Printf("Error writing anonymous proxies: %v\n", err)
+		} else {
+			fmt.Printf("Anonymous proxies saved to: %s\n", state.anonymousFile)
+		}
+	}
 }
 
 // Tea model implementation
@@ -399,11 +506,10 @@ func (s *AppState) View() string {
 func (s *AppState) startChecking() {
 	var wg sync.WaitGroup
 	proxyChan := make(chan string)
-	queueSize := len(s.proxies)
 
 	// Set initial queue size
 	s.mutex.Lock()
-	s.view.QueueSize = queueSize
+	s.view.QueueSize = len(s.proxies)
 	s.mutex.Unlock()
 
 	// Send initial update
@@ -412,7 +518,7 @@ func (s *AppState) startChecking() {
 	if s.debug {
 		s.mutex.Lock()
 		s.view.DebugInfo += fmt.Sprintf("[DEBUG] Starting proxy checks with concurrency: %d\n", s.concurrency)
-		s.view.DebugInfo += fmt.Sprintf("[DEBUG] Total proxies to check: %d\n", queueSize)
+		s.view.DebugInfo += fmt.Sprintf("[DEBUG] Total proxies to check: %d\n", len(s.proxies))
 		s.mutex.Unlock()
 
 		// Send update
@@ -423,7 +529,19 @@ func (s *AppState) startChecking() {
 	for i := 0; i < s.concurrency; i++ {
 		wg.Add(1)
 		go func(workerID int) {
-			defer wg.Done()
+			// Add panic recovery to prevent worker crashes from affecting the whole application
+			defer func() {
+				if r := recover(); r != nil {
+					s.mutex.Lock()
+					s.view.DebugInfo += fmt.Sprintf("[ERROR] Worker %d panicked: %v\n", workerID, r)
+					s.mutex.Unlock()
+
+					// Send update
+					s.updateChan <- progressUpdateMsg{}
+				}
+				wg.Done()
+			}()
+
 			if s.debug {
 				s.mutex.Lock()
 				s.view.DebugInfo += fmt.Sprintf("[DEBUG] Worker %d started\n", workerID)
@@ -442,6 +560,12 @@ func (s *AppState) startChecking() {
 					LastUpdate: time.Now(),
 				}
 				s.view.ActiveChecks[proxy] = status
+
+				// Update queue size when starting a check
+				s.view.QueueSize = len(s.proxies) - s.view.Current - s.view.ActiveJobs
+				if s.view.QueueSize < 0 {
+					s.view.QueueSize = 0
+				}
 				s.mutex.Unlock()
 
 				// Send update
@@ -458,13 +582,8 @@ func (s *AppState) startChecking() {
 
 				result := s.checker.Check(proxy)
 
-				// Update queue size after each check
-				s.mutex.Lock()
-				s.view.QueueSize = queueSize - s.view.Current - s.view.ActiveJobs
-				if s.view.QueueSize < 0 {
-					s.view.QueueSize = 0
-				}
-				s.mutex.Unlock()
+				// Update queue size after each check is no longer needed here as it will be updated in processResult
+				// or when marking a job as inactive
 
 				// Send update
 				s.updateChan <- progressUpdateMsg{}
@@ -496,6 +615,12 @@ func (s *AppState) startChecking() {
 					if status, ok := s.view.ActiveChecks[proxy]; ok {
 						status.IsActive = false
 						status.LastUpdate = time.Now()
+					}
+
+					// Update queue size when a job is marked as inactive
+					s.view.QueueSize = len(s.proxies) - s.view.Current - s.view.ActiveJobs
+					if s.view.QueueSize < 0 {
+						s.view.QueueSize = 0
 					}
 					s.mutex.Unlock()
 
@@ -571,14 +696,43 @@ func (s *AppState) startChecking() {
 		// Send update
 		s.updateChan <- progressUpdateMsg{}
 	}
-	wg.Wait()
-	if s.debug {
-		s.mutex.Lock()
-		s.view.DebugInfo += fmt.Sprintf("[DEBUG] All workers finished\n")
-		s.mutex.Unlock()
 
-		// Send update
-		s.updateChan <- progressUpdateMsg{}
+	// Add a timeout mechanism to prevent deadlocks
+	waitCh := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(waitCh)
+	}()
+
+	// Set a reasonable timeout (adjust as needed)
+	timeout := 30 * time.Second
+	if s.concurrency > 10 {
+		// Add more time for higher concurrency
+		timeout = time.Duration(s.concurrency*3) * time.Second
+	}
+
+	select {
+	case <-waitCh:
+		// All workers finished normally
+		if s.debug {
+			s.mutex.Lock()
+			s.view.DebugInfo += fmt.Sprintf("[DEBUG] All workers finished successfully\n")
+			s.mutex.Unlock()
+
+			// Send update
+			s.updateChan <- progressUpdateMsg{}
+		}
+	case <-time.After(timeout):
+		// Timeout occurred, some workers might be stuck
+		if s.debug {
+			s.mutex.Lock()
+			s.view.DebugInfo += fmt.Sprintf("[DEBUG] WARNING: Timed out waiting for some workers after %v\n", timeout)
+			s.view.DebugInfo += fmt.Sprintf("[DEBUG] Proceeding with available results\n")
+			s.mutex.Unlock()
+
+			// Send update
+			s.updateChan <- progressUpdateMsg{}
+		}
 	}
 
 	// Close the update channel
@@ -625,7 +779,7 @@ func (s *AppState) processResult(result *proxy.ProxyResult) {
 
 	s.view.ActiveChecks[result.ProxyURL] = status
 
-	// Update queue size
+	// Update queue size - calculate remaining proxies to check
 	s.view.QueueSize = len(s.proxies) - s.view.Current - s.view.ActiveJobs
 	if s.view.QueueSize < 0 {
 		s.view.QueueSize = 0
@@ -635,4 +789,59 @@ func (s *AppState) processResult(result *proxy.ProxyResult) {
 	if s.debug && result.DebugInfo != "" {
 		s.view.DebugInfo += result.DebugInfo
 	}
+}
+
+// startCheckingNoUI runs proxy checking without UI (for automation)
+func (s *AppState) startCheckingNoUI() {
+	var wg sync.WaitGroup
+	proxyChan := make(chan string)
+
+	fmt.Printf("Testing %d proxies with concurrency: %d\n", len(s.proxies), s.concurrency)
+
+	// Start workers
+	for i := 0; i < s.concurrency; i++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+
+			for proxy := range proxyChan {
+				if s.verbose {
+					fmt.Printf("[Worker %d] Testing: %s\n", workerID, proxy)
+				}
+
+				result := s.checker.Check(proxy)
+				
+				s.mutex.Lock()
+				s.results = append(s.results, result)
+				current := len(s.results)
+				s.mutex.Unlock()
+
+				if result.Working {
+					fmt.Printf("[%d/%d] ✅ %s - %.2fs", current, len(s.proxies), proxy, result.Speed.Seconds())
+					if result.IsAnonymous {
+						fmt.Printf(" 🔒")
+					}
+					if result.CloudProvider != "" {
+						fmt.Printf(" ☁️[%s]", result.CloudProvider)
+					}
+					fmt.Printf("\n")
+				} else {
+					if s.verbose {
+						fmt.Printf("[%d/%d] ❌ %s - %s\n", current, len(s.proxies), proxy, result.Error)
+					}
+				}
+			}
+		}(i)
+	}
+
+	// Feed proxies to workers
+	for _, proxy := range s.proxies {
+		proxyChan <- proxy
+	}
+	close(proxyChan)
+
+	// Wait for all workers to finish
+	wg.Wait()
+	
+	fmt.Printf("\nProxy checking complete!\n")
 }

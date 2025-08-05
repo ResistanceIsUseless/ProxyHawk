@@ -1,5 +1,5 @@
 # ProxyHawk
-
+[proxyhawk.jpg]
 A comprehensive proxy checker and validator with advanced features for testing HTTP, HTTPS, SOCKS4, and SOCKS5 proxies.
 
 **This tool is still a work in progress and not all features are available.**
@@ -307,3 +307,5 @@ Linting configuration is in `.golangci.yml` and includes:
 - Error checking (errcheck)
 - Security checks (gosec)
 - And many more... 
+
+Shout out to @geeknik for helping me with the name and @nullenc0de for helping as well!!

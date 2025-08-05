@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/ResistanceIsUseless/ProxyHawk/internal/ui"
@@ -18,6 +19,21 @@ func main() {
 
 	// Create mock data for UI testing
 	view := createMockView()
+
+	// Check if animation is requested
+	animate := false
+	for _, arg := range os.Args {
+		if arg == "--animate" || arg == "-a" {
+			animate = true
+			break
+		}
+	}
+
+	// If animation is requested and we're in debug mode, show animated view
+	if animate && (viewType == "debug" || viewType == "all") {
+		animateDebugView(view)
+		return
+	}
 
 	// Display the appropriate view(s)
 	switch viewType {
@@ -37,6 +53,7 @@ func main() {
 		fmt.Println(view.RenderDebug())
 	default:
 		fmt.Printf("Unknown view type: %s\nValid options: default, verbose, debug, all\n", viewType)
+		fmt.Println("Add --animate or -a to see the animated debug view")
 	}
 }
 
@@ -75,8 +92,8 @@ func createMockChecks() map[string]*ui.CheckStatus {
 	// Add some sample proxies with different statuses
 	checks["http://192.168.1.1:8080"] = &ui.CheckStatus{
 		Proxy:          "http://192.168.1.1:8080",
-		TotalChecks:    2,
-		DoneChecks:     2,
+		TotalChecks:    4,
+		DoneChecks:     4,
 		LastUpdate:     now,
 		Speed:          250 * time.Millisecond,
 		ProxyType:      "HTTP",
@@ -88,27 +105,42 @@ func createMockChecks() map[string]*ui.CheckStatus {
 		MetadataAccess: false,
 		CheckResults: []ui.CheckResult{
 			{
-				URL:        "http://example.com",
+				URL:        "GET http://example.com",
 				Success:    true,
 				Speed:      200 * time.Millisecond,
 				StatusCode: 200,
 				BodySize:   1024,
 			},
 			{
-				URL:        "https://example.com",
+				URL:        "HEAD https://example.com",
 				Success:    false,
 				Speed:      300 * time.Millisecond,
 				StatusCode: 403,
 				Error:      "Access forbidden",
 				BodySize:   256,
 			},
+			{
+				URL:        "POST http://api.example.com/login",
+				Success:    false,
+				Speed:      150 * time.Millisecond,
+				StatusCode: 401,
+				Error:      "Authentication required",
+				BodySize:   128,
+			},
+			{
+				URL:        "CONNECT example.com:443",
+				Success:    true,
+				Speed:      175 * time.Millisecond,
+				StatusCode: 200,
+				BodySize:   0,
+			},
 		},
 	}
 
 	checks["socks5://10.0.0.1:1080"] = &ui.CheckStatus{
 		Proxy:          "socks5://10.0.0.1:1080",
-		TotalChecks:    2,
-		DoneChecks:     2,
+		TotalChecks:    3,
+		DoneChecks:     3,
 		LastUpdate:     now,
 		Speed:          150 * time.Millisecond,
 		ProxyType:      "SOCKS5",
@@ -118,78 +150,69 @@ func createMockChecks() map[string]*ui.CheckStatus {
 		SupportsHTTPS:  true,
 		CloudProvider:  "AWS",
 		InternalAccess: true,
-		MetadataAccess: true,
+		MetadataAccess: false,
 		CheckResults: []ui.CheckResult{
 			{
-				URL:        "http://example.com",
+				URL:        "HTTPS https://secure.example.com",
 				Success:    true,
 				Speed:      120 * time.Millisecond,
 				StatusCode: 200,
-				BodySize:   1024,
+				BodySize:   2048,
 			},
 			{
-				URL:        "https://example.com",
+				URL:        "SOCKS5 example.com:22",
 				Success:    true,
 				Speed:      180 * time.Millisecond,
 				StatusCode: 200,
 				BodySize:   1024,
 			},
-		},
-	}
-
-	checks["socks4://172.16.1.5:4145"] = &ui.CheckStatus{
-		Proxy:       "socks4://172.16.1.5:4145",
-		TotalChecks: 2,
-		DoneChecks:  1,
-		LastUpdate:  now,
-		ProxyType:   "SOCKS4",
-		IsActive:    true,
-		Position:    3,
-		CheckResults: []ui.CheckResult{
 			{
-				URL:        "http://example.com",
+				URL:        "HTTP http://internal-service.aws.com",
 				Success:    true,
-				Speed:      350 * time.Millisecond,
+				Speed:      90 * time.Millisecond,
 				StatusCode: 200,
-				BodySize:   1024,
+				BodySize:   4096,
 			},
 		},
 	}
 
-	checks["http://11.22.33.44:3128"] = &ui.CheckStatus{
-		Proxy:         "http://11.22.33.44:3128",
+	// Add a proxy with no completed checks
+	checks["http://10.10.10.10:3128"] = &ui.CheckStatus{
+		Proxy:         "http://10.10.10.10:3128",
 		TotalChecks:   2,
-		DoneChecks:    2,
+		DoneChecks:    0,
 		LastUpdate:    now,
-		Speed:         450 * time.Millisecond,
+		Speed:         0,
 		ProxyType:     "HTTP",
 		IsActive:      true,
-		Position:      4,
+		Position:      3,
 		SupportsHTTP:  false,
+		SupportsHTTPS: false,
+		CheckResults:  []ui.CheckResult{},
+	}
+
+	// Add a very long proxy URL to test display truncation
+	checks["socks4://very-long-proxy-address-that-should-be-truncated.example.com:1080"] = &ui.CheckStatus{
+		Proxy:         "socks4://very-long-proxy-address-that-should-be-truncated.example.com:1080",
+		TotalChecks:   2,
+		DoneChecks:    1,
+		LastUpdate:    now,
+		Speed:         350 * time.Millisecond,
+		ProxyType:     "SOCKS4",
+		IsActive:      true,
+		Position:      4,
+		SupportsHTTP:  true,
 		SupportsHTTPS: false,
 		CheckResults: []ui.CheckResult{
 			{
-				URL:        "http://example.com",
+				URL:        "SOCKS4 target.example.org:21",
 				Success:    false,
-				Error:      "Connection refused",
-				StatusCode: 0,
-			},
-			{
-				URL:        "https://example.com",
-				Success:    false,
-				Error:      "Connection timeout",
-				StatusCode: 0,
+				Speed:      350 * time.Millisecond,
+				StatusCode: 404,
+				Error:      "Destination unreachable",
+				BodySize:   0,
 			},
 		},
-	}
-
-	checks["http://veryveryverylongproxyhostname.com:8888"] = &ui.CheckStatus{
-		Proxy:       "http://veryveryverylongproxyhostname.com:8888",
-		TotalChecks: 2,
-		DoneChecks:  0,
-		LastUpdate:  now,
-		IsActive:    true,
-		Position:    5,
 	}
 
 	return checks
@@ -260,4 +283,61 @@ func createMockDebugInfo() string {
 [DEBUG] Failed to use as SOCKS5 proxy: Connection timeout
 [DEBUG] Worker 4 failed: http://11.22.33.44:3128 - Could not determine proxy type
 [DEBUG] Worker 5 checking: http://veryveryverylongproxyhostname.com:8888`
+}
+
+// animateDebugView displays the debug view with an animated spinner
+func animateDebugView(view *ui.View) {
+	fmt.Println("Press Ctrl+C to exit the animated view")
+
+	for i := 0; i < 60; i++ {
+		// Clear screen by printing newlines
+		fmt.Print(strings.Repeat("\n", 50))
+
+		// Update spinner index
+		view.SpinnerIdx = i
+
+		// For every 10 frames, add a new check result to one of the proxies
+		if i > 0 && i%10 == 0 {
+			// Pick a proxy with the fewest check results
+			var targetProxy string
+			minResults := 999
+
+			for proxy, status := range view.ActiveChecks {
+				if len(status.CheckResults) < minResults {
+					minResults = len(status.CheckResults)
+					targetProxy = proxy
+				}
+			}
+
+			if targetProxy != "" && view.ActiveChecks[targetProxy] != nil {
+				status := view.ActiveChecks[targetProxy]
+
+				// Add a new check result
+				result := ui.CheckResult{
+					URL:        fmt.Sprintf("GET http://example.com/path%d", i/10),
+					Success:    i%20 != 0, // Every other batch has an error
+					Speed:      time.Duration(100+i*5) * time.Millisecond,
+					StatusCode: 200,
+					BodySize:   int64(512 + i*100),
+				}
+
+				// Set error message for failed checks
+				if i%20 == 0 {
+					result.Error = "Connection reset"
+				}
+
+				status.CheckResults = append(status.CheckResults, result)
+
+				status.DoneChecks++
+				view.Current++
+			}
+		}
+
+		// Render and display the debug view
+		fmt.Println("====================== ANIMATED DEBUG VIEW ======================")
+		fmt.Println(view.RenderDebug())
+
+		// Sleep before next frame
+		time.Sleep(200 * time.Millisecond)
+	}
 }

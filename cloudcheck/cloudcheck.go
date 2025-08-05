@@ -126,7 +126,13 @@ func CheckInternalAccess(client *http.Client, provider *CloudProvider, debug boo
 		if debug {
 			debugInfo += fmt.Sprintf("\nTrying internal IP: %s\n", url)
 		}
-		req, _ := http.NewRequest("GET", url, nil)
+		req, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			if debug {
+				debugInfo += fmt.Sprintf("Error creating request for %s: %v\n", url, err)
+			}
+			continue
+		}
 		resp, err := client.Do(req)
 		if err == nil {
 			defer resp.Body.Close()
@@ -149,7 +155,13 @@ func CheckInternalAccess(client *http.Client, provider *CloudProvider, debug boo
 				debugInfo += fmt.Sprintf("\nTrying metadata IP: %s\n", metadataURL)
 			}
 
-			req, _ := http.NewRequest("GET", metadataURL, nil)
+			req, err := http.NewRequest("GET", metadataURL, nil)
+			if err != nil {
+				if debug {
+					debugInfo += fmt.Sprintf("Error creating request for %s: %v\n", metadataURL, err)
+				}
+				continue
+			}
 			// Add provider-specific metadata headers
 			for key, value := range provider.MetadataHeaders {
 				req.Header.Set(key, value)
@@ -180,7 +192,13 @@ func CheckInternalAccess(client *http.Client, provider *CloudProvider, debug boo
 				debugInfo += fmt.Sprintf("\nTrying metadata URL: %s\n", metadataURL)
 			}
 
-			req, _ := http.NewRequest("GET", metadataURL, nil)
+			req, err := http.NewRequest("GET", metadataURL, nil)
+			if err != nil {
+				if debug {
+					debugInfo += fmt.Sprintf("Error creating request for %s: %v\n", metadataURL, err)
+				}
+				continue
+			}
 			// Add provider-specific metadata headers
 			for key, value := range provider.MetadataHeaders {
 				req.Header.Set(key, value)

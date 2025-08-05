@@ -1,3 +1,0 @@
-http://httpbin.org/ip
-https://api.ipify.org?format=json
-http://example.com

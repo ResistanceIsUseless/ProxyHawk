@@ -5,11 +5,13 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ResistanceIsUseless/ProxyHawk/internal/output"
 )
 
 // TestWorkingProxiesOutput tests the working proxies output functionality
 func TestWorkingProxiesOutput(t *testing.T) {
-	results := []ProxyResultOutput{
+	results := []output.ProxyResultOutput{
 		{
 			Proxy:       "http://working1.com:8080",
 			Working:     true,
@@ -34,9 +36,9 @@ func TestWorkingProxiesOutput(t *testing.T) {
 		tempFile := "test_working.txt"
 		defer os.Remove(tempFile)
 
-		err := writeWorkingProxiesOutput(tempFile, results)
+		err := output.WriteWorkingProxiesOutput(tempFile, results)
 		if err != nil {
-			t.Errorf("writeWorkingProxiesOutput() error = %v", err)
+			t.Errorf("output.WriteWorkingProxiesOutput() error = %v", err)
 			return
 		}
 
@@ -61,9 +63,9 @@ func TestWorkingProxiesOutput(t *testing.T) {
 		tempFile := "test_working_anonymous.txt"
 		defer os.Remove(tempFile)
 
-		err := writeWorkingAnonymousProxiesOutput(tempFile, results)
+		err := output.WriteAnonymousProxiesOutput(tempFile, results)
 		if err != nil {
-			t.Errorf("writeWorkingAnonymousProxiesOutput() error = %v", err)
+			t.Errorf("output.WriteAnonymousProxiesOutput() error = %v", err)
 			return
 		}
 

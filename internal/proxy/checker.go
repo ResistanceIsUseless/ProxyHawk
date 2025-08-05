@@ -181,6 +181,13 @@ func (c *Checker) Check(proxyURL string) *ProxyResult {
 func (c *Checker) determineProxyType(proxyURL *url.URL, result *ProxyResult) (ProxyType, *http.Client, error) {
 	var lastError string
 
+	// Save the original validation URL at the beginning of the function
+	origValidationURL := c.config.ValidationURL
+	// Ensure we restore the original URL at the end of the function
+	defer func() {
+		c.config.ValidationURL = origValidationURL
+	}()
+
 	// First check if the proxy URL already specifies a scheme we can use
 	if proxyURL.Scheme != "" {
 		proxyType := ProxyTypeUnknown
@@ -206,9 +213,6 @@ func (c *Checker) determineProxyType(proxyURL *url.URL, result *ProxyResult) (Pr
 			// Try this scheme first
 			client, err := c.createClient(proxyURL, scheme, result)
 			if err == nil {
-				// Try HTTP first
-				origURL := c.config.ValidationURL
-
 				// Test with HTTP endpoint
 				c.config.ValidationURL = "http://api.ipify.org?format=json"
 				httpSuccess, httpTestErr, httpCheckResult := c.testClientWithDetails(client, proxyType, result)
@@ -226,9 +230,6 @@ func (c *Checker) determineProxyType(proxyURL *url.URL, result *ProxyResult) (Pr
 				if httpsCheckResult != nil {
 					result.CheckResults = append(result.CheckResults, *httpsCheckResult)
 				}
-
-				// Restore original validation URL
-				c.config.ValidationURL = origURL
 
 				// Set protocol support based on results
 				if httpSuccess {
@@ -308,9 +309,6 @@ func (c *Checker) determineProxyType(proxyURL *url.URL, result *ProxyResult) (Pr
 			continue
 		}
 
-		// Try HTTP first
-		origURL := c.config.ValidationURL
-
 		// Test with HTTP endpoint
 		c.config.ValidationURL = "http://api.ipify.org?format=json"
 		httpSuccess, httpTestErr, httpCheckResult := c.testClientWithDetails(client, candidate.proxyType, result)
@@ -362,9 +360,6 @@ func (c *Checker) determineProxyType(proxyURL *url.URL, result *ProxyResult) (Pr
 				result.DebugInfo += fmt.Sprintf("[TYPE] Success! Working as %s proxy with HTTPS endpoint\n", candidate.proxyType)
 			}
 		}
-
-		// Restore original validation URL
-		c.config.ValidationURL = origURL
 
 		// If both HTTP and HTTPS succeeded, return right away
 		if httpSuccess && httpsSuccess {
@@ -451,9 +446,6 @@ func (c *Checker) determineProxyType(proxyURL *url.URL, result *ProxyResult) (Pr
 			continue
 		}
 
-		// Test with both HTTP and HTTPS endpoints
-		origURL := c.config.ValidationURL
-
 		// Test with HTTP endpoint
 		c.config.ValidationURL = "http://api.ipify.org?format=json"
 		httpSuccess, httpTestErr, httpCheckResult := c.testClientWithDetails(client, candidate.proxyType, result)
@@ -505,9 +497,6 @@ func (c *Checker) determineProxyType(proxyURL *url.URL, result *ProxyResult) (Pr
 				result.DebugInfo += fmt.Sprintf("[TYPE] Success! Working as %s proxy with HTTPS endpoint\n", candidate.proxyType)
 			}
 		}
-
-		// Restore original validation URL
-		c.config.ValidationURL = origURL
 
 		// If both HTTP and HTTPS succeeded, return right away (prefer SOCKS5 over SOCKS4)
 		if httpSuccess && httpsSuccess {
@@ -1081,6 +1070,9 @@ func (c *Checker) makeRequest(client *http.Client, urlStr string, result *ProxyR
 
 	req, err := http.NewRequestWithContext(ctx, "GET", urlStr, nil)
 	if err != nil {
+		if c.debug {
+			result.DebugInfo += fmt.Sprintf("[DEBUG] Error creating request: %v\n", err)
+		}
 		return nil, err
 	}
 
@@ -1126,7 +1118,7 @@ func (c *Checker) makeRequest(client *http.Client, urlStr string, result *ProxyR
 	if c.debug {
 		if err != nil {
 			result.DebugInfo += fmt.Sprintf("[DEBUG] Request error: %v\n", err)
-		} else {
+		} else if resp != nil {
 			result.DebugInfo += fmt.Sprintf("[DEBUG] Response received in %v:\n", duration)
 			result.DebugInfo += fmt.Sprintf("  Status: %s\n", resp.Status)
 			result.DebugInfo += fmt.Sprintf("[DEBUG] Headers:\n")

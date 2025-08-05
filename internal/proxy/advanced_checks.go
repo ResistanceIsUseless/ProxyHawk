@@ -64,7 +64,7 @@ func (c *Checker) performAdvancedChecks(client *http.Client, result *ProxyResult
 	// Protocol Smuggling Test
 	if c.config.AdvancedChecks.TestProtocolSmuggling {
 		if tester != nil {
-			res, err := tester.PerformInteractshTest(client, func(url string) (*http.Request, error) {
+			res, err := tester.PerformInteractshTest(client, c, func(url string) (*http.Request, error) {
 				req, err := http.NewRequest("POST", fmt.Sprintf("http://%s", url), strings.NewReader("test"))
 				if err != nil {
 					return nil, err
@@ -88,7 +88,7 @@ func (c *Checker) performAdvancedChecks(client *http.Client, result *ProxyResult
 	// DNS Rebinding Test
 	if c.config.AdvancedChecks.TestDNSRebinding {
 		if tester != nil {
-			res, err := tester.PerformInteractshTest(client, func(url string) (*http.Request, error) {
+			res, err := tester.PerformInteractshTest(client, c, func(url string) (*http.Request, error) {
 				req, err := http.NewRequest("GET", fmt.Sprintf("http://%s", url), nil)
 				if err != nil {
 					return nil, err
@@ -112,7 +112,7 @@ func (c *Checker) performAdvancedChecks(client *http.Client, result *ProxyResult
 	// IPv6 Test
 	if c.config.AdvancedChecks.TestIPv6 {
 		if tester != nil {
-			res, err := tester.PerformInteractshTest(client, func(url string) (*http.Request, error) {
+			res, err := tester.PerformInteractshTest(client, c, func(url string) (*http.Request, error) {
 				return http.NewRequest("GET", fmt.Sprintf("http://[%s]", url), nil)
 			})
 			if err == nil {
@@ -132,7 +132,7 @@ func (c *Checker) performAdvancedChecks(client *http.Client, result *ProxyResult
 		var results []*CheckResult
 		if tester != nil {
 			for _, method := range c.config.AdvancedChecks.TestHTTPMethods {
-				res, err := tester.PerformInteractshTest(client, func(url string) (*http.Request, error) {
+				res, err := tester.PerformInteractshTest(client, c, func(url string) (*http.Request, error) {
 					return http.NewRequest(method, fmt.Sprintf("http://%s", url), nil)
 				})
 				if err == nil {
@@ -153,7 +153,7 @@ func (c *Checker) performAdvancedChecks(client *http.Client, result *ProxyResult
 	// Cache Poisoning Test
 	if c.config.AdvancedChecks.TestCachePoisoning {
 		if tester != nil {
-			res, err := tester.PerformInteractshTest(client, func(url string) (*http.Request, error) {
+			res, err := tester.PerformInteractshTest(client, c, func(url string) (*http.Request, error) {
 				req, err := http.NewRequest("GET", fmt.Sprintf("http://%s", url), nil)
 				if err != nil {
 					return nil, err
@@ -177,7 +177,7 @@ func (c *Checker) performAdvancedChecks(client *http.Client, result *ProxyResult
 	// Host Header Injection Test
 	if c.config.AdvancedChecks.TestHostHeaderInjection {
 		if tester != nil {
-			res, err := tester.PerformInteractshTest(client, func(url string) (*http.Request, error) {
+			res, err := tester.PerformInteractshTest(client, c, func(url string) (*http.Request, error) {
 				req, err := http.NewRequest("GET", fmt.Sprintf("http://%s", url), nil)
 				if err != nil {
 					return nil, err

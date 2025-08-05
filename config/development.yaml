@@ -1,0 +1,61 @@
+# ProxyHawk Development Configuration
+# Settings optimized for development and testing
+
+# General settings - faster and more permissive for development
+timeout: 20                   # Longer timeout for debugging
+insecure_skip_verify: true    # Skip TLS verification for testing
+enable_cloud_checks: true     # Enable for testing cloud detection
+enable_anonymity_check: true  # Enable anonymity checking
+concurrency: 3                # Lower concurrency for easier debugging
+
+# Rate limiting - disabled for faster development
+rate_limit_enabled: false     # Disable for faster testing
+rate_limit_delay: 1s          
+rate_limit_per_host: true
+
+# Development user agent
+user_agent: "ProxyHawk-Dev/1.0"
+default_headers:
+  Accept: "*/*"
+  Connection: "keep-alive"
+  User-Agent: "ProxyHawk-Dev/1.0"
+
+# Simple test URL for development
+test_urls:
+  default_url: "http://httpbin.org/ip"  # Use HTTP for easier debugging
+  required_success_count: 1
+  urls:
+    - url: "http://httpbin.org/ip"
+      description: "Development IP Check"
+      required: true
+
+# Relaxed validation for development
+validation:
+  min_response_bytes: 10       # Very low threshold for testing
+  disallowed_keywords:
+    - "Access Denied"
+    - "Proxy Error"
+    - "Bad Gateway"
+
+# Accept any status code for development testing
+require_status_code: 0         # 0 = accept any status code
+require_content_match: ""
+require_header_fields: []
+
+# Minimal cloud provider config for development
+cloud_providers:
+  - name: "AWS"
+    metadata_ips: ["169.254.169.254"]
+    metadata_urls: ["http://169.254.169.254/latest/meta-data/"]
+    internal_ranges: ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
+    org_names: ["Amazon Web Services"]
+
+# Enable advanced checks for development testing
+advanced_checks:
+  test_protocol_smuggling: true     # Enable for testing
+  test_dns_rebinding: true          # Enable for testing
+  test_ipv6: true                   # Enable IPv6 testing
+  test_http_methods: ["GET", "POST", "HEAD"]  # Test multiple methods
+  test_cache_poisoning: true        # Enable for testing
+  test_host_header_injection: true  # Enable for testing
+  disable_interactsh: false         # Enable Interactsh for full testing

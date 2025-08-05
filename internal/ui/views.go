@@ -730,109 +730,86 @@ func (v *View) renderActiveChecksDebug() string {
 			displayProxy = displayProxy[:37] + "..."
 		}
 
-		// Main status line with debug information
-		str.WriteString(fmt.Sprintf("%s %s",
+		// Main status line with the updated format:
+		// [⠋] 127.0.0.1:443 [Checks: 42]
+		str.WriteString(fmt.Sprintf("[%s] %s [Checks: %s]\n",
 			lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Render(spinner),
-			lipgloss.NewStyle().Bold(true).Render(displayProxy)))
+			lipgloss.NewStyle().Bold(true).Render(displayProxy),
+			proxyStatusStyle.Render(fmt.Sprintf("%d", status.DoneChecks))))
 
-		// Add proxy type if available
-		if status.ProxyType != "" {
-			str.WriteString(fmt.Sprintf(" [%s]",
-				successStyle.Render(status.ProxyType)))
-		}
-
-		// Ensure we have valid check counts
-		doneChecks := status.DoneChecks
-		totalChecks := status.TotalChecks
-
-		// If TotalChecks is 0 but we have results, use the length of results
-		if totalChecks == 0 && len(status.CheckResults) > 0 {
-			totalChecks = len(status.CheckResults)
-		}
-
-		// If TotalChecks is still 0, default to at least 1
-		if totalChecks == 0 {
-			totalChecks = 1
-		}
-
-		// Add check progress
-		str.WriteString(fmt.Sprintf(" %s\n",
-			proxyStatusStyle.Render(fmt.Sprintf("(%d/%d checks)", doneChecks, totalChecks))))
-
-		// Cloud provider debug information
-		if status.CloudProvider != "" {
-			str.WriteString(fmt.Sprintf("  Cloud Provider: %s\n", status.CloudProvider))
-
-			// Color-code access information
-			internalAccessText := "No"
-			internalAccessStyle := errorStyle
-			if status.InternalAccess {
-				internalAccessText = "Yes"
-				internalAccessStyle = warningStyle
-			}
-
-			str.WriteString(fmt.Sprintf("  Internal Access: %s\n", internalAccessStyle.Render(internalAccessText)))
-
-			metadataAccessText := "No"
-			metadataAccessStyle := errorStyle
-			if status.MetadataAccess {
-				metadataAccessText = "Yes"
-				metadataAccessStyle = warningStyle
-			}
-
-			str.WriteString(fmt.Sprintf("  Metadata Access: %s\n", metadataAccessStyle.Render(metadataAccessText)))
-		}
-
-		// Display protocol support information
-		str.WriteString("  Protocol Support:\n")
-
-		httpStatus := "No"
-		httpStyle := errorStyle
-		if status.SupportsHTTP {
-			httpStatus = "Yes"
-			httpStyle = successStyle
-		}
-
-		httpsStatus := "No"
-		httpsStyle := errorStyle
-		if status.SupportsHTTPS {
-			httpsStatus = "Yes"
-			httpsStyle = successStyle
-		}
-
-		str.WriteString(fmt.Sprintf("    HTTP: %s\n", httpStyle.Render(httpStatus)))
-		str.WriteString(fmt.Sprintf("    HTTPS: %s\n", httpsStyle.Render(httpsStatus)))
-
-		// Show check results
+		// Show check results in a compact format with * prefix
 		if len(status.CheckResults) > 0 {
-			str.WriteString("  Results:\n")
-			for i, check := range status.CheckResults {
+			for _, check := range status.CheckResults {
 				resultStyle := errorStyle
 				if check.Success {
 					resultStyle = successStyle
 				}
 
-				str.WriteString(fmt.Sprintf("    %d. %s: %s",
-					i+1,
-					check.URL,
-					resultStyle.Render(fmt.Sprintf("%d", check.StatusCode))))
+				// Extract method (GET, POST, CONNECT, etc.) from URL if possible
+				method := "REQUEST"
+				urlParts := strings.SplitN(check.URL, " ", 2)
+				if len(urlParts) > 1 {
+					method = urlParts[0]
+				} else if strings.Contains(strings.ToLower(check.URL), "http") {
+					method = "HTTP"
+				} else if strings.Contains(strings.ToLower(check.URL), "https") {
+					method = "HTTPS"
+				} else if strings.Contains(strings.ToLower(check.URL), "socks4") {
+					method = "SOCKS4"
+				} else if strings.Contains(strings.ToLower(check.URL), "socks5") {
+					method = "SOCKS5"
+				}
+
+				// Format: * METHOD - STATUS (TIME)
+				resultLine := fmt.Sprintf("* %s - %s",
+					method,
+					resultStyle.Render(fmt.Sprintf("%d %s",
+						check.StatusCode,
+						getStatusText(check.StatusCode))))
 
 				if check.Speed > 0 {
-					str.WriteString(fmt.Sprintf(" (%s)",
-						metricValueStyle.Render(check.Speed.Round(time.Millisecond).String())))
+					resultLine += fmt.Sprintf(" (%s)",
+						metricValueStyle.Render(fmt.Sprintf("%dms", check.Speed.Milliseconds())))
 				}
-				str.WriteString("\n")
+				str.WriteString(fmt.Sprintf("  %s\n", resultLine))
 
 				if check.Error != "" {
-					str.WriteString(fmt.Sprintf("       Error: %s\n", errorStyle.Render(check.Error)))
+					str.WriteString(fmt.Sprintf("    %s\n", errorStyle.Render(check.Error)))
 				}
 			}
+		} else {
+			str.WriteString(fmt.Sprintf("  %s\n", infoStyle.Render("No checks completed yet")))
 		}
 
+		// Add an extra line for spacing between proxies
 		str.WriteString("\n")
 	}
 
 	return str.String()
+}
+
+// Helper function to get HTTP status text
+func getStatusText(code int) string {
+	switch {
+	case code >= 100 && code < 200:
+		return "Informational"
+	case code >= 200 && code < 300:
+		return "OK"
+	case code >= 300 && code < 400:
+		return "Redirect"
+	case code == 401:
+		return "Unauthorized"
+	case code == 403:
+		return "Forbidden"
+	case code == 404:
+		return "Not Found"
+	case code >= 400 && code < 500:
+		return "Client Error"
+	case code >= 500:
+		return "Server Error"
+	default:
+		return "Unknown"
+	}
 }
 
 // Helper methods

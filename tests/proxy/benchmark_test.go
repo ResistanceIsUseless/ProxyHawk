@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-const proxyScrapeAPI = "https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&proxy_format=protocolipport&format=text"
+const proxyScrapeAPI = "https://api.proxyscrape.com/v4/free-proxy-list/get?request=display_proxies&proxy_format=protocolipport&format=json"
 
 type proxyHawkConfig struct {
 	Timeout           time.Duration

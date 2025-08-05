@@ -36,3 +36,13 @@ vendor/
 # Environment files
 .env
 *.env.local
+
+# Go workspace file
+go.work
+
+# Temporary test files
+temp/
+*.txt
+*.json
+*.tmp
+*~

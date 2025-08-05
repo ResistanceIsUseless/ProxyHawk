@@ -5,12 +5,14 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/ResistanceIsUseless/ProxyHawk/internal/output"
 )
 
 // TestOutputFormatting tests the output formatting functions
 func TestOutputFormatting(t *testing.T) {
 	// Create test results
-	results := []ProxyResultOutput{
+	results := []output.ProxyResultOutput{
 		{
 			Proxy:          "http://test1.com:8080",
 			Working:        true,
@@ -28,7 +30,7 @@ func TestOutputFormatting(t *testing.T) {
 		},
 	}
 
-	summary := SummaryOutput{
+	summary := output.SummaryOutput{
 		TotalProxies:      2,
 		WorkingProxies:    1,
 		InteractshProxies: 1,
@@ -43,9 +45,9 @@ func TestOutputFormatting(t *testing.T) {
 		tempFile := "test_output.txt"
 		defer os.Remove(tempFile)
 
-		err := writeTextOutput(tempFile, results, summary)
+		err := output.WriteTextOutput(tempFile, results, summary)
 		if err != nil {
-			t.Errorf("writeTextOutput() error = %v", err)
+			t.Errorf("output.WriteTextOutput() error = %v", err)
 			return
 		}
 
@@ -84,7 +86,7 @@ func TestOutputFormatting(t *testing.T) {
 			return
 		}
 
-		var decoded SummaryOutput
+		var decoded output.SummaryOutput
 		if err := json.Unmarshal(data, &decoded); err != nil {
 			t.Errorf("Failed to decode JSON: %v", err)
 		}

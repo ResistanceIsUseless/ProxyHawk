@@ -9,8 +9,7 @@ import (
 )
 
 const (
-	// Version information
-	Version = "1.1.0"
+	// Application information
 	AppName = "ProxyHawk"
 	
 	// Colors for terminal output
@@ -23,6 +22,29 @@ const (
 	colorCyan   = "\033[36m"
 	colorBold   = "\033[1m"
 )
+
+// GetVersion reads the version from the VERSION file
+func GetVersion() string {
+	// Try to find VERSION file relative to executable or current directory
+	versionPaths := []string{
+		"VERSION",
+		"../VERSION",
+		"../../VERSION",
+		"../../../VERSION", // For nested internal packages
+	}
+	
+	for _, path := range versionPaths {
+		if content, err := os.ReadFile(path); err == nil {
+			version := strings.TrimSpace(string(content))
+			if version != "" {
+				return version
+			}
+		}
+	}
+	
+	// Fallback version if file not found
+	return "1.1.0"
+}
 
 // HelpSection represents a section of help documentation
 type HelpSection struct {
@@ -39,17 +61,18 @@ type Example struct {
 
 // GetBanner returns the application banner
 func GetBanner(noColor bool) string {
+	version := GetVersion()
 	if noColor {
 		return fmt.Sprintf(`
 %s v%s - Advanced Proxy Checker and Validator
 Security Testing | Performance Analysis | Cloud Detection
-`, AppName, Version)
+`, AppName, version)
 	}
 	
 	return fmt.Sprintf(`
 %s%s%s v%s - %sAdvanced Proxy Checker and Validator%s
 %sSecurity Testing | Performance Analysis | Cloud Detection%s
-`, colorBold+colorBlue, AppName, colorReset, Version, colorBold, colorReset, colorCyan, colorReset)
+`, colorBold+colorBlue, AppName, colorReset, version, colorBold, colorReset, colorCyan, colorReset)
 }
 
 // GetQuickStart returns quick start guide
@@ -206,12 +229,13 @@ func PrintQuickStart(w io.Writer, noColor bool) {
 
 // PrintVersion prints version information
 func PrintVersion(w io.Writer, noColor bool) {
+	version := GetVersion()
 	if noColor {
-		fmt.Fprintf(w, "%s version %s\n", AppName, Version)
+		fmt.Fprintf(w, "%s version %s\n", AppName, version)
 	} else {
 		fmt.Fprintf(w, "%s%s%s version %s%s%s\n", 
 			colorBold+colorBlue, AppName, colorReset,
-			colorGreen, Version, colorReset)
+			colorGreen, version, colorReset)
 	}
 	fmt.Fprintln(w, "Advanced proxy checker with security testing capabilities")
 	fmt.Fprintln(w, "https://github.com/ResistanceIsUseless/ProxyHawk")

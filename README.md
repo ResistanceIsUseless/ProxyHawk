@@ -21,7 +21,7 @@ go build -o proxyhawk cmd/proxyhawk/main.go
 
 ### Using Go Install
 ```bash
-go install github.com/ResistanceIsUseless/proxyhawk@latest
+go install github.com/ResistanceIsUseless/ProxyHawk/cmd/proxyhawk@latest
 ```
 
 ### Docker (Recommended for Production)

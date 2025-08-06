@@ -91,132 +91,93 @@ func GetFullHelp(noColor bool) string {
 	// Banner
 	fmt.Fprint(b, GetBanner(noColor))
 	
-	// Synopsis
-	sectionHeader(b, "SYNOPSIS", noColor)
-	fmt.Fprintf(b, "  proxyhawk -l PROXY_LIST [OPTIONS]\n\n")
+	// Usage
+	fmt.Fprintf(b, "Usage:\n")
+	fmt.Fprintf(b, "  proxyhawk [flags]\n\n")
 	
-	// Core Options
-	sectionHeader(b, "CORE OPTIONS", noColor)
+	fmt.Fprintf(b, "Flags:\n")
+	
+	// INPUT section
+	sectionHeader(b, "INPUT:", noColor)
 	w := tabwriter.NewWriter(b, 0, 0, 2, ' ', 0)
-	
-	fmt.Fprintf(w, "  -l, --list FILE\t\tFile containing proxy list (required)\n")
-	fmt.Fprintf(w, "  -config FILE\t\tConfiguration file path (default: config/default.yaml)\n")
-	fmt.Fprintf(w, "  -c, --concurrency N\t\tNumber of concurrent checks\n")
-	fmt.Fprintf(w, "  -t, --timeout SECONDS\t\tTimeout per proxy check\n")
-	fmt.Fprintf(w, "  -v, --verbose\t\tEnable verbose output\n")
-	fmt.Fprintf(w, "  -d, --debug\t\tEnable debug mode (detailed logs)\n")
-	fmt.Fprintf(w, "  -h, --help\t\tShow this help message\n")
-	fmt.Fprintf(w, "  --version\t\tShow version information\n")
+	fmt.Fprintf(w, "   -l, -list string\ttarget proxy list file to scan (one proxy per line)\n")
+	fmt.Fprintf(w, "   -config string\tconfiguration file path (default \"config/default.yaml\")\n")
 	w.Flush()
 	fmt.Fprintln(b)
 	
-	// Output Options
-	sectionHeader(b, "OUTPUT OPTIONS", noColor)
+	// DISCOVERY section
+	sectionHeader(b, "DISCOVERY:", noColor)
 	w = tabwriter.NewWriter(b, 0, 0, 2, ' ', 0)
-	
-	fmt.Fprintf(w, "  -o, --output FILE\t\tSave results to text file\n")
-	fmt.Fprintf(w, "  -j, --json FILE\t\tSave results as JSON\n")
-	fmt.Fprintf(w, "  -wp FILE\t\tSave only working proxies\n")
-	fmt.Fprintf(w, "  -wpa FILE\t\tSave only anonymous proxies\n")
-	fmt.Fprintf(w, "  --no-ui\t\tDisable terminal UI (for automation)\n")
+	fmt.Fprintf(w, "   -discover\tenable discovery mode to find proxy candidates\n")
+	fmt.Fprintf(w, "   -discover-source string\tdiscovery source (shodan,censys,freelists,webscraper,all) (default \"all\")\n")
+	fmt.Fprintf(w, "   -discover-query string\tcustom discovery query (uses preset if empty)\n")
+	fmt.Fprintf(w, "   -discover-limit int\tmaximum number of candidates to discover (default 100)\n")
+	fmt.Fprintf(w, "   -discover-validate\tvalidate discovered candidates immediately\n")
+	fmt.Fprintf(w, "   -discover-countries string\tcomma-separated list of country codes to target\n")
+	fmt.Fprintf(w, "   -discover-min-confidence float\tminimum confidence score for candidates\n")
+	fmt.Fprintf(w, "   -discover-no-honeypot-filter\tdisable honeypot detection and filtering\n")
 	w.Flush()
 	fmt.Fprintln(b)
 	
-	// Progress Options
-	sectionHeader(b, "PROGRESS OPTIONS (--no-ui mode)", noColor)
+	// TESTING section
+	sectionHeader(b, "TESTING:", noColor)
 	w = tabwriter.NewWriter(b, 0, 0, 2, ' ', 0)
-	
-	fmt.Fprintf(w, "  --progress TYPE\t\tProgress indicator type:\n")
-	fmt.Fprintf(w, "  \t\t  none     - No progress output\n")
-	fmt.Fprintf(w, "  \t\t  basic    - Text-based progress\n")
-	fmt.Fprintf(w, "  \t\t  bar      - Progress bar (default)\n")
-	fmt.Fprintf(w, "  \t\t  spinner  - Animated spinner\n")
-	fmt.Fprintf(w, "  \t\t  dots     - Dot progress\n")
-	fmt.Fprintf(w, "  \t\t  percent  - Percentage only\n")
-	fmt.Fprintf(w, "  --progress-width N\t\tProgress bar width (default: 50)\n")
-	fmt.Fprintf(w, "  --progress-no-color\t\tDisable colored progress output\n")
+	fmt.Fprintf(w, "   -c, -concurrency int\tnumber of concurrent proxy checks (overrides config)\n")
+	fmt.Fprintf(w, "   -t, -timeout int\ttimeout in seconds per proxy check (overrides config)\n")
+	fmt.Fprintf(w, "   -r, -rdns\tuse reverse DNS lookup for host headers\n")
+	fmt.Fprintf(w, "   -http2\tenable HTTP/2 protocol detection and support\n")
+	fmt.Fprintf(w, "   -http3\tenable HTTP/3 protocol detection and support\n")
 	w.Flush()
 	fmt.Fprintln(b)
 	
-	// Security Options
-	sectionHeader(b, "SECURITY & TESTING OPTIONS", noColor)
+	// RATE-LIMIT section
+	sectionHeader(b, "RATE-LIMIT:", noColor)
 	w = tabwriter.NewWriter(b, 0, 0, 2, ' ', 0)
-	
-	fmt.Fprintf(w, "  -r, --rdns\t\tUse reverse DNS for host headers\n")
-	fmt.Fprintf(w, "  --rate-limit\t\tEnable rate limiting\n")
-	fmt.Fprintf(w, "  --rate-delay DURATION\t\tDelay between requests (e.g., 500ms, 1s)\n")
-	fmt.Fprintf(w, "  --rate-per-host\t\tApply rate limit per host (default)\n")
-	fmt.Fprintf(w, "  --rate-per-proxy\t\tApply rate limit per proxy\n")
+	fmt.Fprintf(w, "   -rate-limit\tenable rate limiting to prevent overwhelming targets\n")
+	fmt.Fprintf(w, "   -rate-per-host\tapply rate limiting per host instead of globally (default true)\n")
+	fmt.Fprintf(w, "   -rate-per-proxy\tapply rate limiting per individual proxy\n")
 	w.Flush()
 	fmt.Fprintln(b)
 	
-	// Advanced Options
-	sectionHeader(b, "ADVANCED OPTIONS", noColor)
+	// OUTPUT section  
+	sectionHeader(b, "OUTPUT:", noColor)
 	w = tabwriter.NewWriter(b, 0, 0, 2, ' ', 0)
-	
-	fmt.Fprintf(w, "  --hot-reload\t\tEnable config hot-reloading\n")
-	fmt.Fprintf(w, "  --metrics\t\tEnable Prometheus metrics\n")
-	fmt.Fprintf(w, "  --metrics-addr ADDR\t\tMetrics server address (default: :9090)\n")
-	fmt.Fprintf(w, "  --metrics-path PATH\t\tMetrics endpoint path (default: /metrics)\n")
+	fmt.Fprintf(w, "   -o, -output string\tfile to save text results\n")
+	fmt.Fprintf(w, "   -j, -json string\tfile to save JSON results\n")
+	fmt.Fprintf(w, "   -wp string\tfile to save only working proxies\n")
+	fmt.Fprintf(w, "   -wpa string\tfile to save only working anonymous proxies\n")
+	fmt.Fprintf(w, "   -v, -verbose\tenable verbose output\n")
+	fmt.Fprintf(w, "   -d, -debug\tenable debug mode with detailed logs\n")
+	fmt.Fprintf(w, "   -no-ui\tdisable terminal UI (for automation/scripting)\n")
 	w.Flush()
 	fmt.Fprintln(b)
 	
-	// Examples
-	examples := GetExamples()
-	sectionHeader(b, "EXAMPLES", noColor)
-	for i, ex := range examples {
-		fmt.Fprintf(b, "  %d. %s\n", i+1, ex.Description)
-		if noColor {
-			fmt.Fprintf(b, "     $ %s\n", ex.Command)
-		} else {
-			fmt.Fprintf(b, "     $ %s%s%s\n", colorCyan, ex.Command, colorReset)
-		}
-		if ex.Explanation != "" {
-			fmt.Fprintf(b, "     %s\n", ex.Explanation)
-		}
-		fmt.Fprintln(b)
-	}
-	
-	// Security Features
-	sectionHeader(b, "SECURITY FEATURES", noColor)
-	fmt.Fprintln(b, "  • SSRF Detection - Tests for Server-Side Request Forgery vulnerabilities")
-	fmt.Fprintln(b, "  • Host Header Injection - Multiple injection vectors and bypass techniques")
-	fmt.Fprintln(b, "  • Protocol Smuggling - HTTP request smuggling detection")
-	fmt.Fprintln(b, "  • Cloud Provider Detection - Identifies AWS, GCP, Azure, and others")
-	fmt.Fprintln(b, "  • Anonymity Checking - Verifies if proxy hides your real IP")
-	fmt.Fprintln(b, "  • Internal Network Scanning - Detects access to private networks")
-	fmt.Fprintln(b, "  • XSS Prevention - Sanitizes all output to prevent code injection")
+	// DISPLAY section
+	sectionHeader(b, "DISPLAY:", noColor)
+	w = tabwriter.NewWriter(b, 0, 0, 2, ' ', 0)
+	fmt.Fprintf(w, "   -progress string\tprogress indicator type (none,basic,bar,spinner,dots,percent) (default \"bar\")\n")
+	fmt.Fprintf(w, "   -progress-width int\twidth of progress bar (default 50)\n")
+	fmt.Fprintf(w, "   -progress-no-color\tdisable colored progress output\n")
+	w.Flush()
 	fmt.Fprintln(b)
 	
-	// Configuration
-	sectionHeader(b, "CONFIGURATION", noColor)
-	fmt.Fprintln(b, "  ProxyHawk uses YAML configuration files for advanced settings.")
-	fmt.Fprintln(b, "  Default config: config/default.yaml")
-	fmt.Fprintln(b, "")
-	fmt.Fprintln(b, "  Key configuration sections:")
-	fmt.Fprintln(b, "  • concurrency     - Number of concurrent workers")
-	fmt.Fprintln(b, "  • timeout         - Proxy check timeout")
-	fmt.Fprintln(b, "  • validation      - Response validation rules")
-	fmt.Fprintln(b, "  • cloud_providers - Cloud provider definitions")
-	fmt.Fprintln(b, "  • advanced_checks - Security testing options")
-	fmt.Fprintln(b, "  • retry           - Retry mechanism settings")
-	fmt.Fprintln(b, "  • auth            - Proxy authentication settings")
+	// ADVANCED section
+	sectionHeader(b, "ADVANCED:", noColor)
+	w = tabwriter.NewWriter(b, 0, 0, 2, ' ', 0)
+	fmt.Fprintf(w, "   -hot-reload\tenable configuration hot-reloading\n")
+	fmt.Fprintf(w, "   -metrics\tenable Prometheus metrics endpoint\n")
+	fmt.Fprintf(w, "   -metrics-addr string\taddress to serve metrics (default \":9090\")\n")
+	fmt.Fprintf(w, "   -metrics-path string\tpath for metrics endpoint (default \"/metrics\")\n")
+	w.Flush()
 	fmt.Fprintln(b)
 	
-	// Environment
-	sectionHeader(b, "ENVIRONMENT", noColor)
-	fmt.Fprintln(b, "  PROXYHAWK_CONFIG    Path to default configuration file")
-	fmt.Fprintln(b, "  PROXYHAWK_NO_COLOR  Disable colored output (set to 1)")
-	fmt.Fprintln(b, "  HTTP_PROXY          HTTP proxy for outbound connections")
-	fmt.Fprintln(b, "  HTTPS_PROXY         HTTPS proxy for outbound connections")
-	fmt.Fprintln(b, "  NO_PROXY            Comma-separated list of hosts to bypass proxy")
-	fmt.Fprintln(b)
-	
-	// More Information
-	sectionHeader(b, "MORE INFORMATION", noColor)
-	fmt.Fprintln(b, "  GitHub:  https://github.com/ResistanceIsUseless/ProxyHawk")
-	fmt.Fprintln(b, "  Issues:  https://github.com/ResistanceIsUseless/ProxyHawk/issues")
-	fmt.Fprintln(b, "  Docs:    https://github.com/ResistanceIsUseless/ProxyHawk/wiki")
+	// HELP section
+	sectionHeader(b, "HELP:", noColor)
+	w = tabwriter.NewWriter(b, 0, 0, 2, ' ', 0)
+	fmt.Fprintf(w, "   -h, -help\tdisplay help information\n")
+	fmt.Fprintf(w, "   -version\tdisplay version information\n")
+	fmt.Fprintf(w, "   -quickstart\tdisplay quick start guide\n")
+	w.Flush()
 	fmt.Fprintln(b)
 	
 	return b.String()
@@ -317,11 +278,7 @@ func PrintUsageError(w io.Writer, err error, noColor bool) {
 
 // sectionHeader adds a formatted section header
 func sectionHeader(b *strings.Builder, title string, noColor bool) {
-	if noColor {
-		fmt.Fprintf(b, "%s\n", title)
-	} else {
-		fmt.Fprintf(b, "%s%s%s\n", colorBold+colorYellow, title, colorReset)
-	}
+	fmt.Fprintf(b, "%s\n", title)
 }
 
 // DetectNoColor checks if color should be disabled

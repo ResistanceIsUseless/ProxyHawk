@@ -4,6 +4,10 @@ results.json
 working.txt
 results.txt
 proxy_results.txt
+discovered-proxies.*
+filtered-proxies.*
+working-proxies.*
+working-discovered-proxies.*
 
 # Development files
 .aider.tags.cache.v3/
@@ -18,6 +22,8 @@ proxy_results.txt
 
 # Binary files
 /proxycheck
+/proxyhawk
+proxyhawk
 *.exe
 *.exe~
 *.dll

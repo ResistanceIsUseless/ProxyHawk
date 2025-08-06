@@ -10,7 +10,7 @@ import (
 
 const (
 	// Version information
-	Version = "1.0.0"
+	Version = "1.1.0"
 	AppName = "ProxyHawk"
 	
 	// Colors for terminal output
@@ -124,6 +124,13 @@ func GetFullHelp(noColor bool) string {
 	fmt.Fprintf(w, "   -v\tenable verbose output\n")
 	fmt.Fprintf(w, "   -d\tenable debug mode with detailed logs\n")
 	fmt.Fprintf(w, "   -no-ui\tdisable terminal UI (for automation/scripting)\n")
+	w.Flush()
+	fmt.Fprintln(b)
+	
+	// VERSION section
+	sectionHeader(b, "VERSION:", noColor)
+	w = tabwriter.NewWriter(b, 0, 0, 2, ' ', 0)
+	fmt.Fprintf(w, "   -version\tdisplay version information\n")
 	w.Flush()
 	fmt.Fprintln(b)
 	

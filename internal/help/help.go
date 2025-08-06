@@ -97,8 +97,8 @@ func GetFullHelp(noColor bool) string {
 	
 	fmt.Fprintf(b, "Flags:\n")
 	
-	// INPUT section
-	sectionHeader(b, "INPUT:", noColor)
+	// TARGET section
+	sectionHeader(b, "TARGET:", noColor)
 	w := tabwriter.NewWriter(b, 0, 0, 2, ' ', 0)
 	fmt.Fprintf(w, "   -l string\ttarget proxy list file to scan (one proxy per line)\n")
 	fmt.Fprintf(w, "   -config string\tconfiguration file path (default \"config/default.yaml\")\n")
@@ -110,32 +110,8 @@ func GetFullHelp(noColor bool) string {
 	w = tabwriter.NewWriter(b, 0, 0, 2, ' ', 0)
 	fmt.Fprintf(w, "   -discover\tenable discovery mode to find proxy candidates\n")
 	fmt.Fprintf(w, "   -discover-source string\tdiscovery source (shodan,censys,freelists,webscraper,all) (default \"all\")\n")
-	fmt.Fprintf(w, "   -discover-query string\tcustom discovery query (uses preset if empty)\n")
 	fmt.Fprintf(w, "   -discover-limit int\tmaximum number of candidates to discover (default 100)\n")
 	fmt.Fprintf(w, "   -discover-validate\tvalidate discovered candidates immediately\n")
-	fmt.Fprintf(w, "   -discover-countries string\tcomma-separated list of country codes to target\n")
-	fmt.Fprintf(w, "   -discover-min-confidence float\tminimum confidence score for candidates\n")
-	fmt.Fprintf(w, "   -discover-no-honeypot-filter\tdisable honeypot detection and filtering\n")
-	w.Flush()
-	fmt.Fprintln(b)
-	
-	// TESTING section
-	sectionHeader(b, "TESTING:", noColor)
-	w = tabwriter.NewWriter(b, 0, 0, 2, ' ', 0)
-	fmt.Fprintf(w, "   -c int\tnumber of concurrent proxy checks (overrides config)\n")
-	fmt.Fprintf(w, "   -t int\ttimeout in seconds per proxy check (overrides config)\n")
-	fmt.Fprintf(w, "   -r\tuse reverse DNS lookup for host headers\n")
-	fmt.Fprintf(w, "   -http2\tenable HTTP/2 protocol detection and support\n")
-	fmt.Fprintf(w, "   -http3\tenable HTTP/3 protocol detection and support\n")
-	w.Flush()
-	fmt.Fprintln(b)
-	
-	// RATE-LIMIT section
-	sectionHeader(b, "RATE-LIMIT:", noColor)
-	w = tabwriter.NewWriter(b, 0, 0, 2, ' ', 0)
-	fmt.Fprintf(w, "   -rate-limit\tenable rate limiting to prevent overwhelming targets\n")
-	fmt.Fprintf(w, "   -rate-per-host\tapply rate limiting per host instead of globally (default true)\n")
-	fmt.Fprintf(w, "   -rate-per-proxy\tapply rate limiting per individual proxy\n")
 	w.Flush()
 	fmt.Fprintln(b)
 	
@@ -145,39 +121,9 @@ func GetFullHelp(noColor bool) string {
 	fmt.Fprintf(w, "   -o string\tfile to save text results\n")
 	fmt.Fprintf(w, "   -j string\tfile to save JSON results\n")
 	fmt.Fprintf(w, "   -wp string\tfile to save only working proxies\n")
-	fmt.Fprintf(w, "   -wpa string\tfile to save only working anonymous proxies\n")
 	fmt.Fprintf(w, "   -v\tenable verbose output\n")
 	fmt.Fprintf(w, "   -d\tenable debug mode with detailed logs\n")
 	fmt.Fprintf(w, "   -no-ui\tdisable terminal UI (for automation/scripting)\n")
-	w.Flush()
-	fmt.Fprintln(b)
-	
-	// DISPLAY section
-	sectionHeader(b, "DISPLAY:", noColor)
-	w = tabwriter.NewWriter(b, 0, 0, 2, ' ', 0)
-	fmt.Fprintf(w, "   -progress string\tprogress indicator type (none,basic,bar,spinner,dots,percent) (default \"bar\")\n")
-	fmt.Fprintf(w, "   -progress-width int\twidth of progress bar (default 50)\n")
-	fmt.Fprintf(w, "   -progress-no-color\tdisable colored progress output\n")
-	w.Flush()
-	fmt.Fprintln(b)
-	
-	// ADVANCED section
-	sectionHeader(b, "ADVANCED:", noColor)
-	w = tabwriter.NewWriter(b, 0, 0, 2, ' ', 0)
-	fmt.Fprintf(w, "   -hot-reload\tenable configuration hot-reloading\n")
-	fmt.Fprintf(w, "   -metrics\tenable Prometheus metrics endpoint\n")
-	fmt.Fprintf(w, "   -metrics-addr string\taddress to serve metrics (default \":9090\")\n")
-	fmt.Fprintf(w, "   -metrics-path string\tpath for metrics endpoint (default \"/metrics\")\n")
-	w.Flush()
-	fmt.Fprintln(b)
-	
-	// HELP section
-	sectionHeader(b, "HELP:", noColor)
-	w = tabwriter.NewWriter(b, 0, 0, 2, ' ', 0)
-	fmt.Fprintf(w, "   -h\tdisplay help information\n")
-	fmt.Fprintf(w, "   -help\tdisplay help information\n")
-	fmt.Fprintf(w, "   -version\tdisplay version information\n")
-	fmt.Fprintf(w, "   -quickstart\tdisplay quick start guide\n")
 	w.Flush()
 	fmt.Fprintln(b)
 	

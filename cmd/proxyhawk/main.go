@@ -114,6 +114,7 @@ func main() {
 	discoverValidate := flag.Bool("discover-validate", false, "Validate discovered candidates immediately")
 	discoverCountries := flag.String("discover-countries", "", "Comma-separated list of country codes to target")
 	discoverMinConfidence := flag.Float64("discover-min-confidence", 0.0, "Minimum confidence score for candidates")
+	discoverNoHoneypotFilter := flag.Bool("discover-no-honeypot-filter", false, "Disable honeypot detection and filtering")
 
 	// Help and version flags
 	showHelp := flag.Bool("help", false, "Show help message")
@@ -261,7 +262,7 @@ func main() {
 
 	// Handle discovery mode
 	if *discoverMode {
-		runDiscoveryMode(cfg, logger, *discoverSource, *discoverQuery, *discoverLimit, *discoverValidate, *outputFile, *jsonFile)
+		runDiscoveryMode(cfg, logger, *discoverSource, *discoverQuery, *discoverLimit, *discoverValidate, *discoverNoHoneypotFilter, *outputFile, *jsonFile)
 		return
 	}
 
@@ -1054,7 +1055,7 @@ func (s *AppState) startCheckingNoUI() {
 }
 
 // runDiscoveryMode handles the proxy discovery workflow
-func runDiscoveryMode(cfg *config.Config, logger *logging.Logger, source, query string, limit int, validate bool, outputFile, jsonFile string) {
+func runDiscoveryMode(cfg *config.Config, logger *logging.Logger, source, query string, limit int, validate bool, noHoneypotFilter bool, outputFile, jsonFile string) {
 	logger.Info("Starting proxy discovery mode",
 		"source", source,
 		"query", query,
@@ -1063,6 +1064,12 @@ func runDiscoveryMode(cfg *config.Config, logger *logging.Logger, source, query 
 
 	// Create discovery manager
 	manager := discovery.NewManager(cfg.Discovery, logger)
+	
+	// Configure honeypot filtering
+	if noHoneypotFilter {
+		manager.SetHoneypotFilterEnabled(false)
+		logger.Info("Honeypot filtering disabled by user request")
+	}
 
 	// Check available sources
 	availableSources := manager.GetAvailableSources()

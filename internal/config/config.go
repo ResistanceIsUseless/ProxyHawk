@@ -130,6 +130,10 @@ type DiscoveryConfig struct {
 	// Output options
 	OutputFormat string `yaml:"output_format"` // json, csv, txt
 	Deduplicate  bool   `yaml:"deduplicate"`
+	
+	// Security options
+	EnableHoneypotFilter bool    `yaml:"enable_honeypot_filter"` // default: true
+	HoneypotThreshold    float64 `yaml:"honeypot_threshold"`     // default: 0.4
 }
 
 // LoadConfig loads configuration from a YAML file
@@ -278,9 +282,11 @@ func GetDefaultConfig() *Config {
 			ExcludeCDN:         true,
 			ExcludeMalicious:   true,
 			RequiredPorts:      []int{}, // Empty means all ports
-			ExcludedASNs:       []string{},
-			OutputFormat:       "json",
-			Deduplicate:        true,
+			ExcludedASNs:         []string{},
+			OutputFormat:         "json",
+			Deduplicate:          true,
+			EnableHoneypotFilter: true, // Enable honeypot filtering by default
+			HoneypotThreshold:    0.4,  // 40% suspicion threshold
 		},
 	}
 }

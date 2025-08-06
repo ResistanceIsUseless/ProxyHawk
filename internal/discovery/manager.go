@@ -13,21 +13,25 @@ import (
 
 // Manager coordinates proxy discovery across multiple sources
 type Manager struct {
-	config      config.DiscoveryConfig
-	discoverers map[string]Discoverer
-	logger      *logging.Logger
-	filters     FilterOptions
-	scoring     ScoringWeights
+	config             config.DiscoveryConfig
+	discoverers        map[string]Discoverer
+	logger             *logging.Logger
+	filters            FilterOptions
+	scoring            ScoringWeights
+	honeypotDetector   *HoneypotDetector
+	enableHoneypotFilter bool
 }
 
 // NewManager creates a new discovery manager
 func NewManager(discoveryConfig config.DiscoveryConfig, logger *logging.Logger) *Manager {
 	m := &Manager{
-		config:      discoveryConfig,
-		discoverers: make(map[string]Discoverer),
-		logger:      logger,
-		filters:     DefaultFilterOptions(),
-		scoring:     DefaultScoringWeights(),
+		config:               discoveryConfig,
+		discoverers:          make(map[string]Discoverer),
+		logger:               logger,
+		filters:              DefaultFilterOptions(),
+		scoring:              DefaultScoringWeights(),
+		honeypotDetector:     NewHoneypotDetector(),
+		enableHoneypotFilter: discoveryConfig.EnableHoneypotFilter,
 	}
 
 	// Initialize discoverers based on configuration
@@ -47,6 +51,11 @@ func NewManager(discoveryConfig config.DiscoveryConfig, logger *logging.Logger) 
 	m.discoverers["webscraper"] = NewWebScraperDiscoverer()
 
 	return m
+}
+
+// SetHoneypotFilterEnabled enables or disables honeypot filtering
+func (m *Manager) SetHoneypotFilterEnabled(enabled bool) {
+	m.enableHoneypotFilter = enabled
 }
 
 // DefaultFilterOptions returns sensible default filter options
@@ -142,7 +151,25 @@ func (m *Manager) SearchAll(query string, maxResults int) (*DiscoveryResult, err
 
 	// Filter candidates
 	filtered := m.filterCandidates(allCandidates)
-	m.logger.Info("Filtered candidates", "before", len(allCandidates), "after", len(filtered))
+	m.logger.Info("Basic filtering completed", "before", len(allCandidates), "after", len(filtered))
+	
+	// Apply honeypot filtering if enabled
+	var honeypotFiltered []ProxyCandidate
+	var suspiciousCandidates []ProxyCandidate
+	if m.enableHoneypotFilter {
+		honeypotFiltered, suspiciousCandidates = m.honeypotDetector.FilterHoneypots(filtered, 0.4)
+		if len(suspiciousCandidates) > 0 {
+			m.logger.Warn("Honeypot detection filtered suspicious candidates", 
+				"original", len(filtered),
+				"clean", len(honeypotFiltered), 
+				"suspicious", len(suspiciousCandidates))
+		}
+		filtered = honeypotFiltered
+	} else {
+		honeypotFiltered = filtered
+	}
+	
+	m.logger.Info("All filtering completed", "before", len(allCandidates), "after", len(filtered))
 
 	// Score and sort candidates
 	scored := m.scoreCandidates(filtered)
@@ -199,6 +226,20 @@ func (m *Manager) SearchSource(sourceName, query string, maxResults int) (*Disco
 
 	// Apply filtering and scoring
 	filtered := m.filterCandidates(result.Candidates)
+	
+	// Apply honeypot filtering if enabled  
+	if m.enableHoneypotFilter {
+		honeypotFiltered, suspiciousCandidates := m.honeypotDetector.FilterHoneypots(filtered, 0.4)
+		if len(suspiciousCandidates) > 0 {
+			m.logger.Warn("Honeypot detection filtered suspicious candidates from single source", 
+				"source", sourceName,
+				"original", len(filtered),
+				"clean", len(honeypotFiltered), 
+				"suspicious", len(suspiciousCandidates))
+		}
+		filtered = honeypotFiltered
+	}
+	
 	scored := m.scoreCandidates(filtered)
 
 	// Sort by confidence
@@ -407,7 +448,13 @@ func (m *Manager) scoreCandidates(candidates []ProxyCandidate) []ProxyCandidate 
 	copy(scored, candidates)
 	
 	for i := range scored {
+		// Calculate base score
 		scored[i].Confidence = m.calculateScore(&scored[i])
+		
+		// Apply honeypot penalty to confidence score
+		if m.enableHoneypotFilter {
+			m.honeypotDetector.UpdateCandidateConfidence(&scored[i])
+		}
 	}
 	
 	return scored

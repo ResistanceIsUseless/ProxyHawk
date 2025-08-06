@@ -30,6 +30,10 @@ discovery:
   # Output options
   output_format: "json"      # json, csv, txt
   deduplicate: true          # Remove duplicate candidates
+  
+  # Security options
+  enable_honeypot_filter: true  # Enable honeypot detection and filtering
+  honeypot_threshold: 0.4       # Suspicion threshold (0.0-1.0)
 
 # Default headers for proxy testing
 default_headers:

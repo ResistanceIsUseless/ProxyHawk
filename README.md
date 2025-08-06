@@ -70,6 +70,7 @@ make docker-run    # Run in container
 - **Auto-Validation**: Automatically test discovered candidates
 - **Deduplication**: Remove duplicate candidates across sources
 - **Preset Queries**: Built-in search queries optimized for each source
+- **🛡️ Honeypot Detection**: Advanced filtering to identify and remove honeypots/monitoring systems
 
 ### Security Testing & Validation
 - **SSRF Detection**: Tests access to cloud metadata services (AWS, GCP, Azure), internal networks (RFC 1918, RFC 6598, RFC 3927), and localhost variants
@@ -135,6 +136,10 @@ discovery:
   exclude_cdn: true
   exclude_malicious: true
   deduplicate: true
+  
+  # Security options
+  enable_honeypot_filter: true  # Enable honeypot detection
+  honeypot_threshold: 0.4       # Suspicion threshold
 ```
 
 You can specify a custom configuration file using the `-config` flag.
@@ -198,6 +203,7 @@ Discovery Options:
 - -discover-validate: Validate discovered candidates immediately
 - -discover-countries: Comma-separated list of country codes to target
 - -discover-min-confidence: Minimum confidence score for candidates
+- -discover-no-honeypot-filter: Disable honeypot detection and filtering
 ```
 ### Example Commands
 
@@ -311,6 +317,16 @@ Discover high-quality proxies and save working ones:
 Discover proxies by specific source with validation:
 ```bash
 ./proxyhawk -discover -discover-source censys -discover-query "services.service_name: http and services.port: 3128" -discover-validate -o censys-proxies.txt
+```
+
+Disable honeypot filtering (not recommended):
+```bash
+./proxyhawk -discover -discover-source shodan -discover-no-honeypot-filter -discover-limit 50
+```
+
+Enable verbose logging to see honeypot filtering in action:
+```bash
+./proxyhawk -discover -discover-source all -discover-limit 100 -v
 ```
 
 ### Output Formats

@@ -2,6 +2,14 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Versioning Guidance
+- Always update the version number in help text and relevant version tracking files when making changes
+- Follow semantic versioning (MAJOR.MINOR.PATCH)
+- Increment version number based on the type of changes:
+  * MAJOR version for incompatible API changes
+  * MINOR version for backwards-compatible new features
+  * PATCH version for backwards-compatible bug fixes
+
 ## Key Commands
 
 ### Building

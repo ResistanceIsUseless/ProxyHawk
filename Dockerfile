@@ -1,5 +1,5 @@
 # Multi-stage Dockerfile for ProxyHawk
-# Supports both amd64 and arm64 architectures
+# Supports both amd64 and arm64 architectures with dual-mode server and Tor integration
 
 # Build stage
 FROM --platform=$BUILDPLATFORM golang:1.23-alpine AS builder
@@ -28,45 +28,59 @@ ENV CGO_ENABLED=0
 ENV GOOS=${TARGETOS}
 ENV GOARCH=${TARGETARCH}
 
+# Build both the main checker and the new server
 RUN go build -ldflags="-w -s" -o proxyhawk cmd/proxyhawk/main.go
+RUN go build -ldflags="-w -s" -o proxyhawk-server cmd/proxyhawk-server/main.go
 
-# Verify the binary was built correctly
-RUN chmod +x proxyhawk
+# Verify the binaries were built correctly
+RUN chmod +x proxyhawk proxyhawk-server
 
-# Final stage - minimal runtime image
+# Final stage - runtime image with Tor support
 FROM --platform=$TARGETPLATFORM alpine:3.19
 
-# Install ca-certificates for HTTPS requests and tzdata for timezone support
-RUN apk --no-cache add ca-certificates tzdata
+# Install runtime dependencies including Tor for proxy chaining
+RUN apk --no-cache add ca-certificates tzdata tor curl
 
 # Create non-root user for security
 RUN addgroup -g 1001 -S proxyhawk && \
     adduser -u 1001 -S proxyhawk -G proxyhawk
 
+# Create necessary directories
+RUN mkdir -p /app/output /app/config /app/logs /var/lib/tor && \
+    chown -R proxyhawk:proxyhawk /app /var/lib/tor
+
 # Set working directory
 WORKDIR /app
 
-# Copy the binary from builder stage
+# Copy binaries from builder stage
 COPY --from=builder /app/proxyhawk .
+COPY --from=builder /app/proxyhawk-server .
 
 # Copy configuration files
 COPY --from=builder /app/config ./config
 
-# Create directories for output files
-RUN mkdir -p /app/output && \
-    chown -R proxyhawk:proxyhawk /app/output
+# Copy Tor configuration
+COPY docker/torrc /etc/tor/torrc
 
 # Switch to non-root user
 USER proxyhawk
 
-# Expose port for metrics (if enabled)
-EXPOSE 9090
+# Expose ports for dual-mode server
+EXPOSE 1080 8080 8888 9090
+# 1080 - SOCKS5 proxy
+# 8080 - HTTP proxy  
+# 8888 - WebSocket API
+# 9090 - Metrics
 
-# Set default command
-ENTRYPOINT ["./proxyhawk"]
+# Health check for server mode
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:9090/health || curl -f http://localhost:8888/health || exit 1
 
-# Default configuration
-CMD ["--config", "config/default.yaml", "--no-ui"]
+# Set default command to dual-mode server
+ENTRYPOINT ["./proxyhawk-server"]
+
+# Default configuration for dual-mode
+CMD ["--config", "config/examples/proxy-chaining.yaml"]
 
 # Metadata
 LABEL maintainer="ProxyHawk Development Team"

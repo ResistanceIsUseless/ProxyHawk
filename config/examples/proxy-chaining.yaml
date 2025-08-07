@@ -1,0 +1,143 @@
+# ProxyHawk Configuration Example: Proxy Chaining
+# This example demonstrates how to configure proxy chaining with Tor integration
+
+# Server configuration
+mode: "dual"  # Run both proxy and WebSocket services
+socks5_addr: ":1080"
+http_addr: ":8080"
+api_addr: ":8888"
+
+# Proxy chaining settings
+proxy_chaining:
+  enabled: true
+  max_chain_length: 3
+  chain_timeout: "45s"
+  chain_retries: 2
+
+# Tor integration
+tor:
+  enabled: true
+  socks_addr: "127.0.0.1:9050"     # Tor SOCKS5 proxy
+  control_addr: "127.0.0.1:9051"   # Tor control port
+  password: ""                     # Leave empty if no password
+  new_circuit_freq: "10m"          # Request new circuit every 10 minutes
+  exit_nodes: ["us", "de", "nl"]   # Preferred exit countries
+  exclude_nodes: ["cn", "ru"]      # Countries to avoid
+
+# Regional proxy configuration with chains
+regions:
+  # US West region with single proxies
+  us-west:
+    proxies:
+      # Single HTTP proxy
+      - url: "http://proxy1.example.com:8080"
+        weight: 10
+        health_check_url: "http://httpbin.org/ip"
+      
+      # Single SOCKS5 proxy
+      - url: "socks5://proxy2.example.com:1080"
+        weight: 15
+        health_check_url: "http://httpbin.org/ip"
+  
+  # US East region with proxy chains
+  us-east:
+    proxies:
+      # Chain through multiple HTTP proxies
+      - chain:
+          - "http://proxy3.example.com:8080"
+          - "http://proxy4.example.com:3128"
+          - "socks5://proxy5.example.com:1080"
+        weight: 20
+        chain_timeout: "30s"
+        retry_on_failure: true
+        health_check_url: "http://httpbin.org/ip"
+      
+      # Chain with Tor as first hop (automatically prepended when tor.enabled=true)
+      - chain:
+          - "http://proxy6.example.com:8080"
+          - "socks5://proxy7.example.com:1080"
+        weight: 25
+        chain_timeout: "45s"
+        retry_on_failure: true
+        health_check_url: "http://httpbin.org/ip"
+  
+  # Europe region with mixed configuration
+  eu-west:
+    proxies:
+      # Single proxy for fast connections
+      - url: "socks5://eu-proxy1.example.com:1080"
+        weight: 10
+        health_check_url: "http://httpbin.org/ip"
+      
+      # Chain for high anonymity
+      - chain:
+          - "http://eu-proxy2.example.com:8080"
+          - "socks5://eu-proxy3.example.com:1080"
+          - "http://eu-proxy4.example.com:3128"
+        weight: 30
+        chain_timeout: "60s"
+        retry_on_failure: true
+        health_check_url: "http://httpbin.org/ip"
+
+# Router configuration
+router:
+  default_region: "us-west"
+  region_header: "X-Proxy-Region"
+  sticky_sessions: true
+  session_ttl: "5m"
+  smart_routing: true
+  cdn_detection: true
+  geoip_lookup: true
+  enable_chaining: true
+
+# Health checking
+health_check:
+  enabled: true
+  interval: "30s"
+  timeout: "10s"
+  failure_threshold: 3
+  success_threshold: 2
+
+# DNS caching
+dns_cache:
+  enabled: true
+  ttl: "300s"
+  max_entries: 1000
+
+# Round-robin detection for geographic testing
+round_robin_detection:
+  enabled: true
+  min_samples: 3
+  sample_interval: "2s"
+  confidence_threshold: 0.8
+
+# Metrics and monitoring
+metrics:
+  enabled: true
+  addr: ":9090"
+
+# Logging
+logging:
+  level: "info"
+  format: "json"
+
+# Example usage scenarios:
+#
+# 1. Route through Tor + HTTP proxy chain:
+#    - Tor (127.0.0.1:9050) -> proxy3.example.com:8080 -> proxy4.example.com:3128 -> target
+#
+# 2. Direct proxy chain without Tor:
+#    - proxy6.example.com:8080 -> proxy7.example.com:1080 -> target
+#
+# 3. Geographic routing:
+#    - For CDN testing: rotate through different regions
+#    - For location-specific content: use appropriate region
+#
+# 4. Fallback behavior:
+#    - If chain fails and retry_on_failure=true, try again
+#    - If no healthy proxies in region, fallback to other regions
+#
+# 5. WebSocket API for dynamic control:
+#    - Request new Tor circuit: {"action": "new_tor_circuit"}
+#    - Change region preference: {"action": "set_region", "region": "eu-west"}
+#    - Get proxy stats: {"action": "get_stats"}

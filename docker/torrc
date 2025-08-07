@@ -1,0 +1,50 @@
+# Tor configuration for ProxyHawk Docker container
+
+# SOCKS proxy configuration
+SOCKSPort 0.0.0.0:9050
+SOCKSPolicy accept 127.0.0.0/8
+SOCKSPolicy accept 10.0.0.0/8
+SOCKSPolicy accept 172.16.0.0/12
+SOCKSPolicy accept 192.168.0.0/16
+
+# Control port for circuit management
+ControlPort 0.0.0.0:9051
+# No authentication required in container environment
+# In production, set a password: HashedControlPassword 16:...
+
+# Directory settings
+DataDirectory /var/lib/tor
+PidFile /var/lib/tor/tor.pid
+Log notice stdout
+
+# Circuit building settings
+CircuitBuildTimeout 30
+LearnCircuitBuildTimeout 1
+NewCircuitPeriod 30
+MaxCircuitDirtiness 600
+
+# Exit policy - allow common web ports
+ExitPolicy accept *:80
+ExitPolicy accept *:443
+ExitPolicy accept *:8080
+ExitPolicy accept *:8443
+ExitPolicy reject *:*
+
+# Performance tuning for container environment
+NumEntryGuards 8
+NumDirectoryGuards 3
+KeepalivePeriod 60
+
+# Disable unused features for better performance
+ClientOnly 1
+DisableDebuggerAttachment 0
+
+# Circuit isolation for better anonymity
+IsolateDestAddr 1
+IsolateDestPort 1
+
+# Bandwidth settings (adjust as needed)
+RelayBandwidthRate 0
+RelayBandwidthBurst 0
+BandwidthRate 1 MB
+BandwidthBurst 2 MB

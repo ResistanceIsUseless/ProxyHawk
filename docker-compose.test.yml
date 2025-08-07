@@ -1,0 +1,103 @@
+# Docker Compose configuration for testing ProxyHawk with SubScope
+version: '3.8'
+
+services:
+  # Tor service for proxy chaining
+  tor:
+    image: alpine:3.19
+    container_name: test-tor
+    command: >
+      sh -c "
+      apk add --no-cache tor &&
+      adduser -D -s /bin/sh tor &&
+      mkdir -p /var/lib/tor &&
+      chown -R tor:tor /var/lib/tor &&
+      su tor -c 'tor -f /etc/tor/torrc'
+      "
+    volumes:
+      - ./docker/torrc:/etc/tor/torrc:ro
+      - tor_test_data:/var/lib/tor
+    ports:
+      - "9050:9050"  # SOCKS5 proxy
+      - "9051:9051"  # Control port
+    restart: unless-stopped
+    networks:
+      - test-network
+    healthcheck:
+      test: ["CMD", "sh", "-c", "apk add --no-cache netcat-openbsd && nc -z localhost 9050"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ProxyHawk server for testing
+  proxyhawk-test:
+    build: .
+    container_name: proxyhawk-test
+    ports:
+      - "1080:1080"  # SOCKS5 proxy
+      - "8080:8080"  # HTTP proxy
+      - "8888:8888"  # WebSocket API
+      - "9090:9090"  # Metrics
+    volumes:
+      - ./config:/app/config:ro
+      - ./test-output:/app/output
+    environment:
+      - TOR_PROXY=tor:9050
+      - TOR_CONTROL=tor:9051
+      - PROXYHAWK_MODE=dual
+      - PROXYHAWK_LOG_LEVEL=debug
+    command: [
+      "--config", "config/examples/proxy-chaining.yaml",
+      "--mode", "dual",
+      "--socks5-addr", ":1080",
+      "--http-addr", ":8080", 
+      "--api-addr", ":8888",
+      "--metrics-addr", ":9090",
+      "--log-level", "debug",
+      "-v"
+    ]
+    restart: unless-stopped
+    networks:
+      - test-network
+    depends_on:
+      tor:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8888/health", "||", "curl", "-f", "http://localhost:9090/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # Test client to validate ProxyHawk is working
+  test-client:
+    image: curlimages/curl:latest
+    container_name: test-client
+    networks:
+      - test-network
+    depends_on:
+      proxyhawk-test:
+        condition: service_healthy
+    command: >
+      sh -c "
+      echo 'Testing ProxyHawk HTTP proxy...' &&
+      curl -x http://proxyhawk-test:8080 -H 'X-Proxy-Region: us-west' http://httpbin.org/ip &&
+      echo 'Testing ProxyHawk WebSocket API...' &&
+      curl -f http://proxyhawk-test:8888/health &&
+      echo 'Testing ProxyHawk metrics...' &&
+      curl -f http://proxyhawk-test:9090/metrics &&
+      echo 'All tests passed!'
+      "
+    restart: "no"
+
+volumes:
+  tor_test_data:
+    driver: local
+
+networks:
+  test-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

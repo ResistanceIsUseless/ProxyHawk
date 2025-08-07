@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 	
@@ -46,7 +47,7 @@ func main() {
 		apiAddr = flag.String("api", ":8888", "API/WebSocket address")
 		
 		// Configuration
-		configFile = flag.String("config", "config.yaml", "Configuration file")
+		configFile = flag.String("config", "", "Configuration file (default: ~/.config/proxyhawk/server.yaml)")
 		
 		// Logging
 		_ = flag.String("log-level", "info", "Log level (debug, info, warn, error)")
@@ -91,14 +92,33 @@ func main() {
 	// Load configuration
 	config := createDefaultConfig(serverMode, *enableMetrics, *metricsAddr)
 	
+	// Determine config file path
+	configPath := *configFile
+	if configPath == "" {
+		// Use default XDG config directory
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			logger.Warn("Could not determine home directory, using current directory")
+			configPath = "server.yaml"
+		} else {
+			configPath = filepath.Join(homeDir, ".config", "proxyhawk", "server.yaml")
+		}
+	}
+	
 	// Load from YAML config file if it exists
-	if *configFile != "config.yaml" || fileExists(*configFile) {
-		if loadedConfig, err := loadConfigFromYAML(*configFile, logger); err != nil {
-			logger.Warn("Failed to load config file, using defaults", "file", *configFile, "error", err)
+	if fileExists(configPath) {
+		if loadedConfig, err := loadConfigFromYAML(configPath, logger); err != nil {
+			logger.Warn("Failed to load config file, using defaults", "file", configPath, "error", err)
 		} else {
 			config = mergeConfigs(config, loadedConfig)
-			logger.Info("Loaded configuration from file", "file", *configFile)
+			logger.Info("Loaded configuration from file", "file", configPath)
 		}
+	} else if *configFile != "" {
+		// User specified a config file but it doesn't exist
+		logger.Warn("Specified config file does not exist, using defaults", "file", configPath)
+	} else {
+		// No config file found, suggest creating one
+		logger.Info("No config file found", "default_path", configPath, "suggestion", "Create config file or use -config flag")
 	}
 	
 	// Initialize the unified server
@@ -246,7 +266,7 @@ FLAGS:
         API/WebSocket address (default ":8888")
     
     -config string
-        Configuration file (default "config.yaml")
+        Configuration file (default "~/.config/proxyhawk/server.yaml")
     
     -log-level string
         Log level: debug, info, warn, error (default "info")

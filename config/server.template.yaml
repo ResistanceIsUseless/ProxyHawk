@@ -1,0 +1,103 @@
+# ProxyHawk Server Configuration Template
+# Copy this file to server.yaml and customize for your environment
+
+# Server operation mode: proxy, agent, or dual
+mode: dual
+
+# Network addresses (change ports if needed)
+socks5_addr: ":1080"
+http_addr: ":8080"
+api_addr: ":8888"
+
+# Proxy selection strategy: random, round_robin, smart, weighted
+selection_strategy: smart
+
+# Regional proxy configurations
+# IMPORTANT: Replace with your actual proxy servers
+regions:
+  # US West Coast region
+  us-west:
+    name: "US West Coast"
+    proxies:
+      - url: "socks5://YOUR_US_WEST_PROXY:1080"
+        weight: 10
+        health_check_url: "http://httpbin.org/ip"
+      # Add more proxies as needed
+      # - url: "http://backup-proxy.example.com:8080"
+      #   weight: 5
+      #   health_check_url: "http://httpbin.org/ip"
+  
+  # US East Coast region  
+  us-east:
+    name: "US East Coast"
+    proxies:
+      - url: "socks5://YOUR_US_EAST_PROXY:1080"
+        weight: 10
+        health_check_url: "http://httpbin.org/ip"
+  
+  # European region
+  eu-west:
+    name: "Western Europe"
+    proxies:
+      - url: "socks5://YOUR_EU_PROXY:1080"
+        weight: 10
+        health_check_url: "http://httpbin.org/ip"
+
+# Round-robin DNS detection
+round_robin_detection:
+  enabled: true
+  min_samples: 5
+  sample_interval: 2s
+  confidence_threshold: 0.85
+
+# Proxy health checking
+health_check:
+  enabled: true
+  interval: 1m
+  timeout: 10s
+  failure_threshold: 3
+  success_threshold: 2
+
+# DNS caching for performance
+cache:
+  enabled: true
+  ttl: 5m
+  max_entries: 10000
+
+# Prometheus metrics (optional)
+metrics:
+  enabled: false  # Set to true to enable metrics
+  addr: ":9090"
+
+# Logging configuration
+log_level: info    # debug, info, warn, error
+log_format: text   # text or json
+
+# Optional: Advanced features (uncomment to enable)
+# 
+# # TLS encryption
+# tls:
+#   enabled: false
+#   cert_file: "/path/to/cert.pem"
+#   key_file: "/path/to/key.pem"
+# 
+# # Authentication
+# auth:
+#   enabled: false
+#   method: "token"
+#   tokens:
+#     - "your-secure-token-here"
+# 
+# # Tor integration
+# tor:
+#   enabled: false
+#   socks_addr: "127.0.0.1:9050"
+#   control_addr: "127.0.0.1:9051" 
+#   password: ""
+# 
+# # Proxy chaining
+# proxy_chaining:
+#   enabled: false
+#   max_chain_length: 3
+#   timeout: 30s
+#   retries: 2

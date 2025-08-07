@@ -24,6 +24,8 @@ working-discovered-proxies.*
 /proxycheck
 /proxyhawk
 proxyhawk
+proxyhawk-server
+build/
 *.exe
 *.exe~
 *.dll

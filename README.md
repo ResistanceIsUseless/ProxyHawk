@@ -16,7 +16,7 @@ A comprehensive proxy checker and validator with **advanced security testing** c
 ```bash
 git clone https://github.com/ResistanceIsUseless/ProxyHawk.git
 cd ProxyHawk
-go build -o proxyhawk cmd/proxyhawk/main.go
+make build  # Builds both proxyhawk and proxyhawk-server in ./build/
 ```
 
 ### Using Go Install
@@ -27,16 +27,13 @@ go install github.com/ResistanceIsUseless/ProxyHawk/cmd/proxyhawk@latest
 ### Docker (Recommended for Production)
 ```bash
 # Quick start with Docker
-docker build -t proxyhawk .
-docker run --rm -v $(pwd)/proxies.txt:/app/proxies.txt:ro -v $(pwd)/output:/app/output proxyhawk -l proxies.txt -o output/results.txt --no-ui
-
-# Or use the deployment script for easier management
-./scripts/deploy.sh setup
-./scripts/deploy.sh run-basic
-
-# Full monitoring stack with Prometheus + Grafana
+cd deployments/docker
 docker-compose up -d
-# Access Grafana at http://localhost:3000 (admin/admin)
+
+# Access services:
+# - ProxyHawk API: http://localhost:8888/api/health
+# - Prometheus: http://localhost:9090  
+# - Grafana: http://localhost:3000 (admin/admin)
 ```
 
 ### Using Makefile

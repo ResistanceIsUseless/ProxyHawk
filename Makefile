@@ -10,19 +10,27 @@ help: ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 # Build commands
-build: ## Build the ProxyHawk binary
-	@echo "Building ProxyHawk..."
-	go build -ldflags="-w -s" -o proxyhawk cmd/proxyhawk/main.go
-	@echo "Build complete: ./proxyhawk"
+build: ## Build the ProxyHawk binaries
+	@echo "Building ProxyHawk binaries..."
+	@mkdir -p build
+	go build -ldflags="-w -s" -o build/proxyhawk cmd/proxyhawk/main.go
+	go build -ldflags="-w -s" -o build/proxyhawk-server cmd/proxyhawk-server/main.go
+	@echo "Build complete: ./build/proxyhawk, ./build/proxyhawk-server"
 
 build-all: ## Build for all platforms (Linux, macOS, Windows)
 	@echo "Building for all platforms..."
-	GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o dist/proxyhawk-linux-amd64 cmd/proxyhawk/main.go
-	GOOS=linux GOARCH=arm64 go build -ldflags="-w -s" -o dist/proxyhawk-linux-arm64 cmd/proxyhawk/main.go
-	GOOS=darwin GOARCH=amd64 go build -ldflags="-w -s" -o dist/proxyhawk-darwin-amd64 cmd/proxyhawk/main.go
-	GOOS=darwin GOARCH=arm64 go build -ldflags="-w -s" -o dist/proxyhawk-darwin-arm64 cmd/proxyhawk/main.go
-	GOOS=windows GOARCH=amd64 go build -ldflags="-w -s" -o dist/proxyhawk-windows-amd64.exe cmd/proxyhawk/main.go
-	@echo "Multi-platform build complete in ./dist/"
+	@mkdir -p build/dist
+	GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o build/dist/proxyhawk-linux-amd64 cmd/proxyhawk/main.go
+	GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o build/dist/proxyhawk-server-linux-amd64 cmd/proxyhawk-server/main.go
+	GOOS=linux GOARCH=arm64 go build -ldflags="-w -s" -o build/dist/proxyhawk-linux-arm64 cmd/proxyhawk/main.go
+	GOOS=linux GOARCH=arm64 go build -ldflags="-w -s" -o build/dist/proxyhawk-server-linux-arm64 cmd/proxyhawk-server/main.go
+	GOOS=darwin GOARCH=amd64 go build -ldflags="-w -s" -o build/dist/proxyhawk-darwin-amd64 cmd/proxyhawk/main.go
+	GOOS=darwin GOARCH=amd64 go build -ldflags="-w -s" -o build/dist/proxyhawk-server-darwin-amd64 cmd/proxyhawk-server/main.go
+	GOOS=darwin GOARCH=arm64 go build -ldflags="-w -s" -o build/dist/proxyhawk-darwin-arm64 cmd/proxyhawk/main.go
+	GOOS=darwin GOARCH=arm64 go build -ldflags="-w -s" -o build/dist/proxyhawk-server-darwin-arm64 cmd/proxyhawk-server/main.go
+	GOOS=windows GOARCH=amd64 go build -ldflags="-w -s" -o build/dist/proxyhawk-windows-amd64.exe cmd/proxyhawk/main.go
+	GOOS=windows GOARCH=amd64 go build -ldflags="-w -s" -o build/dist/proxyhawk-server-windows-amd64.exe cmd/proxyhawk-server/main.go
+	@echo "Multi-platform build complete in ./build/dist/"
 
 # Test commands
 test: ## Run all tests
@@ -79,12 +87,12 @@ deps-clean: ## Clean module cache
 # Docker commands
 docker-build: ## Build Docker image
 	@echo "Building Docker image..."
-	docker build -t proxyhawk:latest .
+	docker build -f deployments/docker/Dockerfile -t proxyhawk:latest .
 	@echo "Docker image built: proxyhawk:latest"
 
 docker-build-multi: ## Build multi-architecture Docker image
 	@echo "Building multi-architecture Docker image..."
-	docker buildx build --platform linux/amd64,linux/arm64 -t proxyhawk:latest .
+	docker buildx build --platform linux/amd64,linux/arm64 -f deployments/docker/Dockerfile -t proxyhawk:latest .
 
 docker-run: ## Run Docker container with test configuration
 	@echo "Running Docker container..."
@@ -105,15 +113,15 @@ docker-run-metrics: ## Run Docker container with metrics enabled
 
 docker-compose-up: ## Start all Docker Compose services
 	@echo "Starting Docker Compose services..."
-	docker-compose up -d
+	cd deployments/docker && docker-compose up -d
 	@echo "Services started. Access Grafana at http://localhost:3000 (admin/admin)"
 
 docker-compose-down: ## Stop all Docker Compose services
 	@echo "Stopping Docker Compose services..."
-	docker-compose down
+	cd deployments/docker && docker-compose down
 
 docker-compose-logs: ## Show Docker Compose logs
-	docker-compose logs -f
+	cd deployments/docker && docker-compose logs -f
 
 docker-push: ## Push Docker image to registry (requires REGISTRY variable)
 ifndef REGISTRY
@@ -146,8 +154,7 @@ run-metrics: ## Run ProxyHawk with metrics enabled
 # Clean commands
 clean: ## Clean build artifacts
 	@echo "Cleaning build artifacts..."
-	rm -f proxyhawk
-	rm -rf dist/
+	rm -rf build/
 	rm -f coverage.out coverage.html
 	go clean ./...
 

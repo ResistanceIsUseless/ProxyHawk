@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"os"
 	"os/signal"
@@ -10,6 +11,7 @@ import (
 	"time"
 	
 	"github.com/ResistanceIsUseless/ProxyHawk/pkg/server"
+	"gopkg.in/yaml.v2"
 )
 
 // SimpleLogger implements the server.Logger interface
@@ -89,9 +91,14 @@ func main() {
 	// Load configuration
 	config := createDefaultConfig(serverMode, *enableMetrics, *metricsAddr)
 	
-	// TODO: Load from YAML config file if it exists
+	// Load from YAML config file if it exists
 	if *configFile != "config.yaml" || fileExists(*configFile) {
-		logger.Info("Config file support will be added", "file", *configFile)
+		if loadedConfig, err := loadConfigFromYAML(*configFile, logger); err != nil {
+			logger.Warn("Failed to load config file, using defaults", "file", *configFile, "error", err)
+		} else {
+			config = mergeConfigs(config, loadedConfig)
+			logger.Info("Loaded configuration from file", "file", *configFile)
+		}
 	}
 	
 	// Initialize the unified server
@@ -311,4 +318,210 @@ Features:
 
 Homepage: https://github.com/ResistanceIsUseless/ProxyHawk
 `)
+}
+
+// loadConfigFromYAML loads configuration from a YAML file
+func loadConfigFromYAML(filename string, logger *SimpleLogger) (*server.Config, error) {
+	data, err := ioutil.ReadFile(filename)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read config file: %w", err)
+	}
+	
+	var yamlConfig YAMLConfig
+	if err := yaml.Unmarshal(data, &yamlConfig); err != nil {
+		return nil, fmt.Errorf("failed to parse YAML config: %w", err)
+	}
+	
+	// Convert YAML config to server.Config
+	config := convertYAMLToConfig(&yamlConfig)
+	return config, nil
+}
+
+// mergeConfigs merges a loaded config with the default config
+func mergeConfigs(defaultConfig, loadedConfig *server.Config) *server.Config {
+	// Start with default config as base
+	merged := *defaultConfig
+	
+	// Override with loaded values if they are non-zero/non-empty
+	if loadedConfig.SOCKS5Addr != "" {
+		merged.SOCKS5Addr = loadedConfig.SOCKS5Addr
+	}
+	if loadedConfig.HTTPAddr != "" {
+		merged.HTTPAddr = loadedConfig.HTTPAddr
+	}
+	if loadedConfig.APIAddr != "" {
+		merged.APIAddr = loadedConfig.APIAddr
+	}
+	
+	// Merge regions if provided
+	if len(loadedConfig.Regions) > 0 {
+		merged.Regions = loadedConfig.Regions
+	}
+	
+	// Merge other configurations
+	if loadedConfig.SelectionStrategy != "" {
+		merged.SelectionStrategy = loadedConfig.SelectionStrategy
+	}
+	
+	// Override boolean and numeric values
+	if loadedConfig.RoundRobinDetection.Enabled {
+		merged.RoundRobinDetection = loadedConfig.RoundRobinDetection
+	}
+	if loadedConfig.HealthCheck.Enabled {
+		merged.HealthCheck = loadedConfig.HealthCheck
+	}
+	if loadedConfig.CacheConfig.Enabled {
+		merged.CacheConfig = loadedConfig.CacheConfig
+	}
+	
+	if loadedConfig.MetricsEnabled {
+		merged.MetricsEnabled = loadedConfig.MetricsEnabled
+		merged.MetricsAddr = loadedConfig.MetricsAddr
+	}
+	
+	if loadedConfig.LogLevel != "" {
+		merged.LogLevel = loadedConfig.LogLevel
+	}
+	if loadedConfig.LogFormat != "" {
+		merged.LogFormat = loadedConfig.LogFormat
+	}
+	
+	return &merged
+}
+
+// YAMLConfig represents the YAML configuration structure
+type YAMLConfig struct {
+	Mode         string                   `yaml:"mode"`
+	SOCKS5Addr   string                   `yaml:"socks5_addr"`
+	HTTPAddr     string                   `yaml:"http_addr"`
+	APIAddr      string                   `yaml:"api_addr"`
+	
+	Regions  map[string]YAMLRegion    `yaml:"regions"`
+	Strategy string                   `yaml:"selection_strategy"`
+	
+	RoundRobinDetection YAMLRoundRobinConfig `yaml:"round_robin_detection"`
+	HealthCheck        YAMLHealthCheckConfig `yaml:"health_check"`
+	Cache              YAMLCacheConfig       `yaml:"cache"`
+	
+	Metrics YAMLMetricsConfig `yaml:"metrics"`
+	
+	LogLevel  string `yaml:"log_level"`
+	LogFormat string `yaml:"log_format"`
+}
+
+// YAMLRegion represents a region configuration in YAML
+type YAMLRegion struct {
+	Name    string        `yaml:"name"`
+	Proxies []YAMLProxy   `yaml:"proxies"`
+}
+
+// YAMLProxy represents a proxy configuration in YAML
+type YAMLProxy struct {
+	URL            string `yaml:"url"`
+	Weight         int    `yaml:"weight"`
+	HealthCheckURL string `yaml:"health_check_url"`
+}
+
+// YAMLRoundRobinConfig represents round robin configuration in YAML
+type YAMLRoundRobinConfig struct {
+	Enabled             bool          `yaml:"enabled"`
+	MinSamples          int           `yaml:"min_samples"`
+	SampleInterval      time.Duration `yaml:"sample_interval"`
+	ConfidenceThreshold float64       `yaml:"confidence_threshold"`
+}
+
+// YAMLHealthCheckConfig represents health check configuration in YAML
+type YAMLHealthCheckConfig struct {
+	Enabled          bool          `yaml:"enabled"`
+	Interval         time.Duration `yaml:"interval"`
+	Timeout          time.Duration `yaml:"timeout"`
+	FailureThreshold int           `yaml:"failure_threshold"`
+	SuccessThreshold int           `yaml:"success_threshold"`
+}
+
+// YAMLCacheConfig represents cache configuration in YAML
+type YAMLCacheConfig struct {
+	Enabled    bool          `yaml:"enabled"`
+	TTL        time.Duration `yaml:"ttl"`
+	MaxEntries int           `yaml:"max_entries"`
+}
+
+// YAMLMetricsConfig represents metrics configuration in YAML
+type YAMLMetricsConfig struct {
+	Enabled bool   `yaml:"enabled"`
+	Addr    string `yaml:"addr"`
+}
+
+// convertYAMLToConfig converts YAML config to server.Config
+func convertYAMLToConfig(yamlConfig *YAMLConfig) *server.Config {
+	config := &server.Config{
+		Mode:       server.ServerMode(yamlConfig.Mode),
+		SOCKS5Addr: yamlConfig.SOCKS5Addr,
+		HTTPAddr:   yamlConfig.HTTPAddr,
+		APIAddr:    yamlConfig.APIAddr,
+		LogLevel:   yamlConfig.LogLevel,
+		LogFormat:  yamlConfig.LogFormat,
+	}
+	
+	// Convert selection strategy
+	switch yamlConfig.Strategy {
+	case "random":
+		config.SelectionStrategy = server.StrategyRandom
+	case "round_robin":
+		config.SelectionStrategy = server.StrategyRoundRobin
+	case "smart":
+		config.SelectionStrategy = server.StrategySmart
+	case "weighted":
+		config.SelectionStrategy = server.StrategyWeighted
+	}
+	
+	// Convert regions
+	config.Regions = make(map[string]*server.RegionConfig)
+	for regionName, yamlRegion := range yamlConfig.Regions {
+		region := &server.RegionConfig{
+			Name:    yamlRegion.Name,
+			Proxies: make([]server.ProxyConfig, 0, len(yamlRegion.Proxies)),
+		}
+		
+		for _, yamlProxy := range yamlRegion.Proxies {
+			proxy := server.ProxyConfig{
+				URL:            yamlProxy.URL,
+				Weight:         yamlProxy.Weight,
+				HealthCheckURL: yamlProxy.HealthCheckURL,
+			}
+			region.Proxies = append(region.Proxies, proxy)
+		}
+		
+		config.Regions[regionName] = region
+	}
+	
+	// Convert round robin detection
+	config.RoundRobinDetection = server.RoundRobinConfig{
+		Enabled:             yamlConfig.RoundRobinDetection.Enabled,
+		MinSamples:          yamlConfig.RoundRobinDetection.MinSamples,
+		SampleInterval:      yamlConfig.RoundRobinDetection.SampleInterval,
+		ConfidenceThreshold: yamlConfig.RoundRobinDetection.ConfidenceThreshold,
+	}
+	
+	// Convert health check
+	config.HealthCheck = server.HealthCheckConfig{
+		Enabled:          yamlConfig.HealthCheck.Enabled,
+		Interval:         yamlConfig.HealthCheck.Interval,
+		Timeout:          yamlConfig.HealthCheck.Timeout,
+		FailureThreshold: yamlConfig.HealthCheck.FailureThreshold,
+		SuccessThreshold: yamlConfig.HealthCheck.SuccessThreshold,
+	}
+	
+	// Convert cache config
+	config.CacheConfig = server.CacheConfig{
+		Enabled:    yamlConfig.Cache.Enabled,
+		TTL:        yamlConfig.Cache.TTL,
+		MaxEntries: yamlConfig.Cache.MaxEntries,
+	}
+	
+	// Convert metrics
+	config.MetricsEnabled = yamlConfig.Metrics.Enabled
+	config.MetricsAddr = yamlConfig.Metrics.Addr
+	
+	return config
 }

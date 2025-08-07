@@ -35,6 +35,18 @@ type TorController struct {
 
 // NewProxyChain creates a new proxy chain handler
 func NewProxyChain(config *RouterConfig, logger Logger) *ProxyChain {
+	// Validate required parameters
+	if config == nil {
+		if logger != nil {
+			logger.Error("NewProxyChain called with nil config")
+		}
+		return nil
+	}
+	if logger == nil {
+		// Use a no-op logger if none provided
+		logger = &noOpLogger{}
+	}
+	
 	pc := &ProxyChain{
 		config: config,
 		logger: logger,
@@ -487,3 +499,11 @@ func (cc *ChainedConnection) GetChain() []string {
 func (cc *ChainedConnection) GetLatency() time.Duration {
 	return cc.latency
 }
+
+// noOpLogger is a no-operation logger for fallback cases
+type noOpLogger struct{}
+
+func (l *noOpLogger) Info(msg string, keysAndValues ...interface{})  {}
+func (l *noOpLogger) Debug(msg string, keysAndValues ...interface{}) {}
+func (l *noOpLogger) Warn(msg string, keysAndValues ...interface{})  {}
+func (l *noOpLogger) Error(msg string, keysAndValues ...interface{}) {}

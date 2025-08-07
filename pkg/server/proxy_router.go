@@ -103,6 +103,10 @@ func NewProxyRouter(pools *ProxyPoolManager, strategy SelectionStrategy, logger 
 	
 	// Initialize proxy chain handler
 	router.proxyChain = NewProxyChain(config, logger)
+	if router.proxyChain == nil {
+		logger.Error("Failed to initialize proxy chain handler - disabling chaining")
+		config.EnableChaining = false
+	}
 	
 	return router
 }

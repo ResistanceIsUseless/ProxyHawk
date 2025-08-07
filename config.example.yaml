@@ -1,0 +1,85 @@
+# ProxyHawk Server Configuration Example
+# This file demonstrates all available configuration options
+
+# Server operation mode: proxy, agent, or dual
+mode: dual
+
+# Network addresses
+socks5_addr: ":1080"
+http_addr: ":8080"
+api_addr: ":8888"
+
+# Proxy selection strategy: random, round_robin, smart, weighted
+selection_strategy: smart
+
+# Regional proxy configurations
+regions:
+  us-west:
+    name: "US West Coast"
+    proxies:
+      - url: "socks5://us-west-1.example.com:1080"
+        weight: 10
+        health_check_url: "http://httpbin.org/ip"
+      - url: "http://us-west-2.example.com:8080"
+        weight: 8
+        health_check_url: "http://httpbin.org/ip"
+  
+  us-east:
+    name: "US East Coast"
+    proxies:
+      - url: "socks5://us-east-1.example.com:1080"
+        weight: 10
+        health_check_url: "http://httpbin.org/ip"
+  
+  eu-west:
+    name: "Western Europe"
+    proxies:
+      - url: "socks5://eu-west-1.example.com:1080"
+        weight: 10
+        health_check_url: "http://httpbin.org/ip"
+      - url: "socks5://eu-west-2.example.com:1080"
+        weight: 7
+        health_check_url: "http://httpbin.org/ip"
+
+# Round-robin DNS detection
+round_robin_detection:
+  enabled: true
+  min_samples: 5
+  sample_interval: 2s
+  confidence_threshold: 0.85
+
+# Proxy health checking
+health_check:
+  enabled: true
+  interval: 1m
+  timeout: 10s
+  failure_threshold: 3
+  success_threshold: 2
+
+# DNS caching configuration
+cache:
+  enabled: true
+  ttl: 5m
+  max_entries: 10000
+
+# Prometheus metrics
+metrics:
+  enabled: false
+  addr: ":9090"
+
+# Logging configuration
+log_level: info
+log_format: text
+
+# Advanced features (future extensions)
+# tor:
+#   enabled: false
+#   socks_addr: "127.0.0.1:9050"
+#   control_addr: "127.0.0.1:9051"
+#   password: ""
+#   
+# proxy_chaining:
+#   enabled: false
+#   max_chain_length: 3
+#   timeout: 30s
+#   retries: 2

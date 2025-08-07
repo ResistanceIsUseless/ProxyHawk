@@ -6,7 +6,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/ResistanceIsUseless/ProxyHawk/cloudcheck"
+	"github.com/ResistanceIsUseless/ProxyHawk/internal/cloudcheck"
 	"github.com/ResistanceIsUseless/ProxyHawk/internal/errors"
 	"github.com/ResistanceIsUseless/ProxyHawk/internal/proxy"
 )

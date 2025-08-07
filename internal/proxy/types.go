@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ResistanceIsUseless/ProxyHawk/cloudcheck"
+	"github.com/ResistanceIsUseless/ProxyHawk/internal/cloudcheck"
 )
 
 // ProxyType represents the type of proxy

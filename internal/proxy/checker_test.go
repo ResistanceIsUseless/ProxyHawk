@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ResistanceIsUseless/ProxyHawk/cloudcheck"
+	"github.com/ResistanceIsUseless/ProxyHawk/internal/cloudcheck"
 )
 
 // TestNewChecker tests the creation of a new proxy checker

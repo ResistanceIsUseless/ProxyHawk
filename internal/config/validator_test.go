@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ResistanceIsUseless/ProxyHawk/cloudcheck"
+	"github.com/ResistanceIsUseless/ProxyHawk/internal/cloudcheck"
 	"github.com/ResistanceIsUseless/ProxyHawk/internal/proxy"
 )
 

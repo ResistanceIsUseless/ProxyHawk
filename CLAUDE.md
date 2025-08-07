@@ -75,7 +75,7 @@ go mod tidy
 - **cmd/proxyhawk/**: Main application entry point with CLI flags, configuration loading, and concurrent proxy checking orchestration
 - **internal/proxy/**: Core proxy checking logic including protocol detection (HTTP/HTTPS/SOCKS4/SOCKS5), advanced security checks, and rate limiting
 - **internal/ui/**: Terminal UI implementation using bubbletea/bubbles for real-time progress visualization
-- **cloudcheck/**: Cloud provider detection and metadata access validation
+- **internal/cloudcheck/**: Cloud provider detection and metadata access validation
 - **tests/**: Comprehensive test suite with Makefile for easy test execution
 
 ### Core Components

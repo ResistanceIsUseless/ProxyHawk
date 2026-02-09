@@ -687,6 +687,11 @@ func (s *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		progress := float64(s.view.Current) / float64(s.view.Total)
 		progressCmd := s.view.Progress.SetPercent(progress)
 
+		// Debug logging
+		if s.debug {
+			s.view.AddDebugMessage(fmt.Sprintf("[PROGRESS] %d/%d (%.1f%%)\n", s.view.Current, s.view.Total, progress*100))
+		}
+
 		s.mutex.Unlock()
 
 		cmds = append(cmds, progressCmd)
@@ -842,9 +847,10 @@ func (s *AppState) startChecking() {
 				// Send update
 				s.updateChan <- progressUpdateMsg{}
 
-				if !result.Working {
-					if s.debug {
-						s.mutex.Lock()
+				// Log debug info based on result
+				if s.debug {
+					s.mutex.Lock()
+					if !result.Working {
 						// Create a more concise error message
 						errorMsg := "Proxy not working"
 						if result.Error != nil {
@@ -855,37 +861,16 @@ func (s *AppState) startChecking() {
 							}
 						}
 						s.view.AddDebugMessage(fmt.Sprintf("[DEBUG] Worker %d failed: %s - %s\n", workerID, proxy, errorMsg))
-						s.mutex.Unlock()
-
-						// Send update
-						s.updateChan <- progressUpdateMsg{}
+					} else {
+						s.view.AddDebugMessage(fmt.Sprintf("[DEBUG] Worker %d success: %s (%s)\n", workerID, proxy, result.Type))
 					}
-
-					// Mark job as inactive on error
-					s.mutex.Lock()
-					if status, ok := s.view.ActiveChecks[proxy]; ok {
-						status.IsActive = false
-						status.LastUpdate = time.Now()
-					}
-					s.mutex.Unlock()
-
-					// Update queue size when a job is marked as inactive
-					// Queue size tracked in metrics
-					// Send update
-					s.updateChan <- progressUpdateMsg{}
-
-					continue
-				}
-
-				if s.debug {
-					s.mutex.Lock()
-					s.view.AddDebugMessage(fmt.Sprintf("[DEBUG] Worker %d success: %s (%s)\n", workerID, proxy, result.Type))
 					s.mutex.Unlock()
 
 					// Send update
 					s.updateChan <- progressUpdateMsg{}
 				}
 
+				// Always process result (whether working or not) to update counters
 				s.processResult(result)
 
 				// Send update

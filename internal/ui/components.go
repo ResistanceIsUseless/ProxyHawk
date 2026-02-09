@@ -126,14 +126,16 @@ func (p *ProgressComponent) Render() string {
 
 	var b strings.Builder
 
-	// Percentage
-	percentage := FormatPercentage(p.Current, p.Total)
-	b.WriteString(dimStyle.Render("Checking proxies "))
-	b.WriteString(MetricValueStyle.Render(percentage))
-	b.WriteString("\n")
-
 	// Progress bar
 	b.WriteString(p.Progress.View())
+	b.WriteString("\n")
+
+	// Count and percentage on same line
+	percentage := FormatPercentage(p.Current, p.Total)
+	count := FormatCount(p.Current, p.Total)
+	b.WriteString(dimStyle.Render(count))
+	b.WriteString(" ")
+	b.WriteString(MetricValueStyle.Render(percentage))
 
 	return ProgressStyle.Render(b.String())
 }

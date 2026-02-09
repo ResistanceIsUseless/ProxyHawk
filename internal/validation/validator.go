@@ -428,12 +428,15 @@ func isPrivateIPv4(ip net.IP) bool {
 	}
 
 	// Additional reserved ranges
+	// NOTE: We only block truly private/internal ranges, not Class E (240.0.0.0/4)
+	// as some of these addresses may be allocated for public use
 	reservedRanges := []string{
-		"0.0.0.0/8",       // Current network
-		"127.0.0.0/8",     // Loopback
-		"224.0.0.0/4",     // Multicast
-		"240.0.0.0/4",     // Reserved for future use
-		"255.255.255.255/32", // Broadcast
+		"0.0.0.0/8",       // Current network (RFC 1122)
+		"127.0.0.0/8",     // Loopback (RFC 1122)
+		"224.0.0.0/4",     // Multicast (RFC 5771)
+		// Note: 240.0.0.0/4 (Class E) historically reserved but may be used
+		// We're being more permissive here to allow potentially valid proxies
+		"255.255.255.255/32", // Limited broadcast (RFC 919)
 	}
 
 	// Combine all ranges

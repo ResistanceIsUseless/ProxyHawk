@@ -10,477 +10,397 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// ViewMode represents the display mode
-type ViewMode int
-
-const (
-	ModeDefault ViewMode = iota
-	ModeVerbose
-	ModeDebug
-)
-
-// Component represents a renderable UI component
+// Component interface for all renderable UI elements
 type Component interface {
 	Render() string
 }
 
-// ProgressComponent handles progress display
+// =============================================================================
+// HEADER COMPONENT
+// =============================================================================
+
+// HeaderComponent displays the application header
+type HeaderComponent struct {
+	Title string
+	Mode  ViewMode
+}
+
+func (h *HeaderComponent) Render() string {
+	title := "ProxyHawk"
+
+	switch h.Mode {
+	case ModeVerbose:
+		title += " • Verbose Mode"
+	case ModeDebug:
+		title += " • Debug Mode"
+	}
+
+	return HeaderStyle.Render(title)
+}
+
+// =============================================================================
+// STATS BAR COMPONENT
+// =============================================================================
+
+// StatsBarComponent shows key metrics in a horizontal bar
+type StatsBarComponent struct {
+	Current     int
+	Total       int
+	Working     int
+	Failed      int
+	Active      int
+	AvgSpeed    time.Duration
+}
+
+func (s *StatsBarComponent) Render() string {
+	if s.Total == 0 {
+		return StatsBarStyle.Render("Initializing...")
+	}
+
+	// Calculate success rate
+	completed := s.Current
+	successRate := 0.0
+	if completed > 0 {
+		successRate = float64(s.Working) / float64(completed) * 100
+	}
+
+	// Build stats items
+	var items []string
+
+	// Progress
+	items = append(items, fmt.Sprintf("%s %s",
+		MetricLabelStyle.Render("Progress:"),
+		MetricValueStyle.Render(FormatCount(s.Current, s.Total))))
+
+	// Working (green if good, red if bad)
+	workingStyle := MetricGoodStyle
+	if successRate < 50 && completed > 5 {
+		workingStyle = MetricBadStyle
+	}
+	items = append(items, fmt.Sprintf("%s %s",
+		MetricLabelStyle.Render("Working:"),
+		workingStyle.Render(fmt.Sprintf("%d", s.Working))))
+
+	// Failed
+	if s.Failed > 0 {
+		items = append(items, fmt.Sprintf("%s %s",
+			MetricLabelStyle.Render("Failed:"),
+			MetricBadStyle.Render(fmt.Sprintf("%d", s.Failed))))
+	}
+
+	// Active
+	if s.Active > 0 {
+		items = append(items, fmt.Sprintf("%s %s",
+			MetricLabelStyle.Render("Active:"),
+			ActiveStyle.Render(fmt.Sprintf("%d", s.Active))))
+	}
+
+	// Average speed
+	if s.AvgSpeed > 0 {
+		speedStr := fmt.Sprintf("%.0fms", float64(s.AvgSpeed.Milliseconds()))
+		items = append(items, fmt.Sprintf("%s %s",
+			MetricLabelStyle.Render("Avg:"),
+			ProxySpeedStyle.Render(speedStr)))
+	}
+
+	// Join with separator
+	content := strings.Join(items, "  •  ")
+	return StatsBarStyle.Render(content)
+}
+
+// =============================================================================
+// PROGRESS COMPONENT
+// =============================================================================
+
+// ProgressComponent displays a progress bar
 type ProgressComponent struct {
 	Progress progress.Model
 	Current  int
 	Total    int
-	Layout   LayoutConfig
 }
 
 func (p *ProgressComponent) Render() string {
-	if p == nil {
-		return ErrorStyle.Render("Progress component is nil")
-	}
-
-	var builder strings.Builder
-
-	// Ensure we have valid progress values
-	current := p.Current
-	total := p.Total
-	if current < 0 {
-		current = 0
-	}
-	if total < 0 {
-		total = 0
-	}
-	if current > total && total > 0 {
-		current = total
-	}
-
-	builder.WriteString(fmt.Sprintf("%s %s/%s\n",
-		MetricLabelStyle.Render("Progress:"),
-		MetricValueStyle.Render(fmt.Sprintf("%d", current)),
-		MetricValueStyle.Render(fmt.Sprintf("%d", total))))
-
-	// Only show progress bar if we have valid progress model
-	if p.Progress.Percent() >= 0 {
-		builder.WriteString(p.Progress.View())
-	} else {
-		builder.WriteString(InfoStyle.Render("Calculating progress..."))
-	}
-
-	// Apply layout-aware styling
-	style := ProgressStyle
-	if p.Layout.ContentWidth > 0 {
-		style = ApplyLayoutToStyle(style, p.Layout)
-	}
-
-	return style.Render(builder.String())
-}
-
-// MetricsComponent displays key metrics
-type MetricsComponent struct {
-	ActiveJobs   int
-	QueueSize    int
-	SuccessRate  float64
-	AvgSpeed     time.Duration
-	WorkingCount int
-	TotalCount   int
-}
-
-func (m *MetricsComponent) Render() string {
-	if m == nil {
-		return ErrorStyle.Render("Metrics component is nil")
-	}
-
-	var builder strings.Builder
-
-	// Ensure non-negative values
-	activeJobs := m.ActiveJobs
-	if activeJobs < 0 {
-		activeJobs = 0
-	}
-
-	queueSize := m.QueueSize
-	if queueSize < 0 {
-		queueSize = 0
-	}
-
-	workingCount := m.WorkingCount
-	if workingCount < 0 {
-		workingCount = 0
-	}
-
-	totalCount := m.TotalCount
-	if totalCount < 0 {
-		totalCount = 0
-	}
-
-	successRate := m.SuccessRate
-	if successRate < 0 {
-		successRate = 0
-	} else if successRate > 100 {
-		successRate = 100
-	}
-
-	builder.WriteString(fmt.Sprintf("%s %d\n",
-		MetricLabelStyle.Render("Active Jobs:"),
-		activeJobs))
-
-	builder.WriteString(fmt.Sprintf("%s %d\n",
-		MetricLabelStyle.Render("Queue Size:"),
-		queueSize))
-
-	builder.WriteString(fmt.Sprintf("%s %s/%d (%.1f%%)\n",
-		MetricLabelStyle.Render("Working:"),
-		SuccessStyle.Render(fmt.Sprintf("%d", workingCount)),
-		totalCount,
-		successRate))
-
-	// Handle potential negative or zero duration gracefully
-	avgSpeedStr := "N/A"
-	if m.AvgSpeed > 0 {
-		avgSpeedStr = m.AvgSpeed.Round(time.Millisecond).String()
-	}
-
-	builder.WriteString(fmt.Sprintf("%s %v\n",
-		MetricLabelStyle.Render("Avg Speed:"),
-		MetricValueStyle.Render(avgSpeedStr)))
-
-	return MetricBlockStyle.Render(builder.String())
-}
-
-// ActiveCheckItem represents a single active check
-type ActiveCheckItem struct {
-	Proxy        string
-	Status       *CheckStatus
-	SpinnerFrame string
-}
-
-func (a *ActiveCheckItem) Render(mode ViewMode) string {
-	if a == nil {
-		return ErrorStyle.Render("ActiveCheckItem is nil")
-	}
-
-	if a.Status == nil {
-		return ErrorStyle.Render("CheckStatus is nil for proxy: " + a.Proxy)
-	}
-
-	var builder strings.Builder
-
-	// Safely determine status
-	successCount := 0
-	totalResults := len(a.Status.CheckResults)
-	for _, check := range a.Status.CheckResults {
-		if check.Success {
-			successCount++
-		}
-	}
-
-	// Handle edge cases with total checks
-	totalChecks := a.Status.TotalChecks
-	if totalChecks < 0 {
-		totalChecks = 0
-	}
-
-	isComplete := totalResults == totalChecks && totalChecks > 0
-	isSuccess := successCount == totalChecks && isComplete
-	isPartial := successCount > 0 && !isSuccess && isComplete
-
-	statusIcon := GetStatusIcon(isSuccess, isPartial, isComplete)
-	statusStyle := GetStatusStyle(isSuccess, isPartial, isComplete)
-
-	// Safely format proxy URL
-	displayProxy := strings.TrimSpace(a.Proxy)
-	if displayProxy == "" {
-		displayProxy = "Unknown proxy"
-	}
-
-	maxLen := 35
-	if mode == ModeVerbose {
-		maxLen = 50
-	}
-	if len(displayProxy) > maxLen {
-		displayProxy = displayProxy[:maxLen-3] + "..."
-	}
-
-	// Main status line
-	if isComplete {
-		builder.WriteString(fmt.Sprintf("%s %s",
-			statusStyle.Render(statusIcon),
-			ProxyURLStyle.Render(displayProxy)))
-	} else {
-		builder.WriteString(fmt.Sprintf("%s %s",
-			SpinnerStyle.Render(a.SpinnerFrame),
-			ProxyURLStyle.Render(displayProxy)))
-	}
-
-	// Add proxy type
-	if a.Status.ProxyType != "" {
-		builder.WriteString(fmt.Sprintf(" [%s]",
-			SuccessStyle.Render(a.Status.ProxyType)))
-	}
-
-	// Add protocol support indicators
-	protocols := []string{}
-	if a.Status.SupportsHTTP {
-		protocols = append(protocols, "HTTP")
-	}
-	if a.Status.SupportsHTTPS {
-		protocols = append(protocols, "HTTPS")
-	}
-	if len(protocols) > 0 {
-		builder.WriteString(fmt.Sprintf(" (%s)",
-			SuccessStyle.Render(strings.Join(protocols, "+"))))
-	}
-
-	// Add speed if available
-	if a.Status.Speed > 0 {
-		builder.WriteString(fmt.Sprintf(" %s",
-			MetricValueStyle.Render(a.Status.Speed.Round(time.Millisecond).String())))
-	}
-
-	builder.WriteString("\n")
-
-	// Add detailed info based on mode
-	switch mode {
-	case ModeVerbose:
-		builder.WriteString(a.renderVerboseDetails())
-	case ModeDebug:
-		builder.WriteString(a.renderDebugDetails())
-	}
-
-	return builder.String()
-}
-
-func (a *ActiveCheckItem) renderVerboseDetails() string {
-	var builder strings.Builder
-
-	// Show individual check results
-	if len(a.Status.CheckResults) > 0 {
-		builder.WriteString("  Results:\n")
-		for i, check := range a.Status.CheckResults {
-			statusStyle := GetHTTPStatusStyle(check.StatusCode)
-			statusText := GetHTTPStatusText(check.StatusCode)
-
-			builder.WriteString(fmt.Sprintf("    %d. %s: %s",
-				i+1,
-				check.URL,
-				statusStyle.Render(fmt.Sprintf("%d %s", check.StatusCode, statusText))))
-
-			if check.Speed > 0 {
-				builder.WriteString(fmt.Sprintf(" (%s)",
-					MetricValueStyle.Render(check.Speed.Round(time.Millisecond).String())))
-			}
-			builder.WriteString("\n")
-
-			if check.Error != "" {
-				builder.WriteString(fmt.Sprintf("       %s\n",
-					ErrorStyle.Render("Error: "+check.Error)))
-			}
-		}
-	}
-
-	return builder.String()
-}
-
-func (a *ActiveCheckItem) renderDebugDetails() string {
-	var builder strings.Builder
-
-	// Show compact check results
-	if len(a.Status.CheckResults) > 0 {
-		for _, check := range a.Status.CheckResults {
-			statusStyle := GetHTTPStatusStyle(check.StatusCode)
-
-			method := extractMethod(check.URL)
-
-			resultLine := fmt.Sprintf("  * %s - %s",
-				method,
-				statusStyle.Render(fmt.Sprintf("%d %s",
-					check.StatusCode,
-					GetHTTPStatusText(check.StatusCode))))
-
-			if check.Speed > 0 {
-				resultLine += fmt.Sprintf(" (%s)",
-					MetricValueStyle.Render(fmt.Sprintf("%dms", check.Speed.Milliseconds())))
-			}
-
-			builder.WriteString(resultLine + "\n")
-
-			if check.Error != "" {
-				builder.WriteString(fmt.Sprintf("    %s\n",
-					ErrorStyle.Render(check.Error)))
-			}
-		}
-	} else {
-		builder.WriteString(fmt.Sprintf("  %s\n",
-			InfoStyle.Render("No checks completed yet")))
-	}
-
-	return builder.String()
-}
-
-// ActiveChecksComponent manages the display of active proxy checks
-type ActiveChecksComponent struct {
-	ActiveChecks map[string]*CheckStatus
-	SpinnerIdx   int
-	Mode         ViewMode
-}
-
-func (ac *ActiveChecksComponent) Render() string {
-	if ac == nil {
-		return ErrorStyle.Render("ActiveChecks component is nil")
-	}
-
-	if ac.ActiveChecks == nil {
-		return InfoStyle.Render("No active checks data available")
-	}
-
-	var builder strings.Builder
-
-	activeList := ac.getActiveChecksList()
-
-	// Header with counts
-	activeCount := len(activeList)
-	if activeCount == 0 {
-		builder.WriteString(InfoStyle.Render("No active checks at the moment\n"))
-		return builder.String()
-	}
-
-	// Render each active check with safe spinner index
-	var spinnerFrame string
-	if len(SpinnerFrames) > 0 {
-		spinnerFrame = SpinnerFrames[ac.SpinnerIdx%len(SpinnerFrames)]
-	} else {
-		spinnerFrame = "⠋" // fallback spinner frame
-	}
-
-	for _, item := range activeList {
-		if item.status == nil {
-			builder.WriteString(ErrorStyle.Render("Invalid check status\n"))
-			continue
-		}
-
-		checkItem := &ActiveCheckItem{
-			Proxy:        item.proxy,
-			Status:       item.status,
-			SpinnerFrame: spinnerFrame,
-		}
-
-		if rendered := checkItem.Render(ac.Mode); rendered != "" {
-			builder.WriteString(rendered)
-
-			if ac.Mode == ModeDebug {
-				builder.WriteString("\n") // Extra spacing in debug mode
-			}
-		}
-	}
-
-	result := builder.String()
-	if result == "" {
-		return InfoStyle.Render("No active checks to display")
-	}
-
-	return result
-}
-
-func (ac *ActiveChecksComponent) getActiveChecksList() []struct {
-	proxy  string
-	status *CheckStatus
-} {
-	var activeList []struct {
-		proxy  string
-		status *CheckStatus
-	}
-
-	for proxy, status := range ac.ActiveChecks {
-		if status.IsActive && time.Since(status.LastUpdate) < 5*time.Second {
-			activeList = append(activeList, struct {
-				proxy  string
-				status *CheckStatus
-			}{proxy, status})
-		}
-	}
-
-	// Sort by position or proxy name
-	sort.Slice(activeList, func(i, j int) bool {
-		if activeList[i].status.Position != activeList[j].status.Position {
-			return activeList[i].status.Position < activeList[j].status.Position
-		}
-		return activeList[i].proxy < activeList[j].proxy
-	})
-
-	return activeList
-}
-
-// DebugLogComponent displays recent debug log entries
-type DebugLogComponent struct {
-	DebugInfo string
-	MaxLines  int
-}
-
-func (d *DebugLogComponent) Render() string {
-	if d.DebugInfo == "" {
+	if p.Total == 0 {
 		return ""
 	}
 
-	var builder strings.Builder
+	var b strings.Builder
 
-	builder.WriteString(HeaderStyle.Copy().
-		Foreground(lipgloss.Color(ColorDebug)).
-		BorderForeground(lipgloss.Color(ColorDebug)).
-		Render("RECENT LOG EVENTS") + "\n\n")
+	// Percentage
+	percentage := FormatPercentage(p.Current, p.Total)
+	b.WriteString(dimStyle.Render("Checking proxies "))
+	b.WriteString(MetricValueStyle.Render(percentage))
+	b.WriteString("\n")
 
-	// Show only the most recent lines
-	lines := strings.Split(d.DebugInfo, "\n")
-	maxLines := d.MaxLines
-	if maxLines <= 0 {
-		maxLines = 15
+	// Progress bar
+	b.WriteString(p.Progress.View())
+
+	return ProgressStyle.Render(b.String())
+}
+
+// =============================================================================
+// ACTIVE CHECKS COMPONENT
+// =============================================================================
+
+// ActiveChecksComponent displays currently running checks
+type ActiveChecksComponent struct {
+	Checks      map[string]*CheckStatus
+	SpinnerIdx  int
+	Mode        ViewMode
+	MaxVisible  int
+}
+
+func (a *ActiveChecksComponent) Render() string {
+	if len(a.Checks) == 0 {
+		return ChecksSectionStyle.Render(
+			dimStyle.Render("No active checks"))
 	}
 
-	start := 0
-	if len(lines) > maxLines {
-		start = len(lines) - maxLines
+	// Get active checks sorted by position
+	active := a.getActiveSorted()
+	if len(active) == 0 {
+		return ChecksSectionStyle.Render(
+			dimStyle.Render("Waiting for checks to start..."))
 	}
 
-	for _, line := range lines[start:] {
-		if line == "" {
-			continue
+	// Limit visible items
+	maxVisible := a.MaxVisible
+	if maxVisible <= 0 {
+		maxVisible = 10
+	}
+	if len(active) > maxVisible {
+		active = active[:maxVisible]
+	}
+
+	var b strings.Builder
+
+	// Section header
+	b.WriteString(dimStyle.Render(fmt.Sprintf("Active Checks (%d)", len(active))))
+	b.WriteString("\n\n")
+
+	// Render each check
+	spinnerFrame := SpinnerFrames[a.SpinnerIdx%len(SpinnerFrames)]
+
+	for i, check := range active {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(a.renderCheck(check, spinnerFrame))
+	}
+
+	return ChecksSectionStyle.Render(b.String())
+}
+
+func (a *ActiveChecksComponent) renderCheck(status *CheckStatus, spinner string) string {
+	// Determine status
+	isComplete := status.DoneChecks >= status.TotalChecks && status.TotalChecks > 0
+	hasSuccess := false
+	hasFailed := false
+
+	for _, result := range status.CheckResults {
+		if result.Success {
+			hasSuccess = true
+		} else {
+			hasFailed = true
+		}
+	}
+
+	// Format proxy URL
+	proxyURL := status.Proxy
+	if len(proxyURL) > 45 {
+		proxyURL = proxyURL[:42] + "..."
+	}
+
+	var b strings.Builder
+
+	// Status icon and URL
+	if isComplete {
+		icon := GetStatusIcon(hasSuccess, hasFailed, false)
+		style := GetStatusStyle(hasSuccess, hasFailed, false)
+		b.WriteString(style.Render(icon + " "))
+	} else {
+		b.WriteString(ActiveStyle.Render(spinner + " "))
+	}
+
+	b.WriteString(ProxyURLStyle.Render(proxyURL))
+
+	// Protocol badges
+	var badges []string
+	if status.ProxyType != "" {
+		badges = append(badges, ProxyTypeStyle.Render(status.ProxyType))
+	}
+	if status.SupportsHTTP {
+		badges = append(badges, dimStyle.Render("HTTP"))
+	}
+	if status.SupportsHTTPS {
+		badges = append(badges, dimStyle.Render("HTTPS"))
+	}
+	if len(badges) > 0 {
+		b.WriteString(" " + strings.Join(badges, " "))
+	}
+
+	// Speed
+	if status.Speed > 0 {
+		speedMs := status.Speed.Milliseconds()
+		speedStyle := ProxySpeedStyle
+		if speedMs > 2000 {
+			speedStyle = WarningStyle
+		} else if speedMs < 500 {
+			speedStyle = SuccessStyle
+		}
+		b.WriteString(" " + speedStyle.Render(fmt.Sprintf("%.0fms", float64(speedMs))))
+	}
+
+	// Detailed mode info
+	if a.Mode == ModeVerbose || a.Mode == ModeDebug {
+		b.WriteString("\n")
+		b.WriteString(a.renderCheckDetails(status))
+	}
+
+	return b.String()
+}
+
+func (a *ActiveChecksComponent) renderCheckDetails(status *CheckStatus) string {
+	var b strings.Builder
+
+	// Check results summary
+	if len(status.CheckResults) > 0 {
+		success := 0
+		failed := 0
+		for _, r := range status.CheckResults {
+			if r.Success {
+				success++
+			} else {
+				failed++
+			}
 		}
 
-		// Color-code based on content
-		style := DebugTextStyle
-		if strings.Contains(strings.ToLower(line), "success") ||
-			strings.Contains(strings.ToLower(line), "working") {
-			style = SuccessStyle
-		} else if strings.Contains(strings.ToLower(line), "error") ||
-			strings.Contains(strings.ToLower(line), "failed") {
+		b.WriteString("  ")
+		if success > 0 {
+			b.WriteString(SuccessStyle.Render(fmt.Sprintf("✓ %d", success)))
+		}
+		if failed > 0 {
+			if success > 0 {
+				b.WriteString(" ")
+			}
+			b.WriteString(ErrorStyle.Render(fmt.Sprintf("✗ %d", failed)))
+		}
+
+		// Show individual results in debug mode
+		if a.Mode == ModeDebug {
+			for _, r := range status.CheckResults {
+				b.WriteString("\n  ")
+				if r.Success {
+					b.WriteString(SuccessStyle.Render("✓"))
+				} else {
+					b.WriteString(ErrorStyle.Render("✗"))
+				}
+				b.WriteString(" " + dimStyle.Render(r.URL))
+				if r.Error != "" {
+					b.WriteString(" " + ErrorStyle.Render(r.Error))
+				}
+			}
+		}
+	}
+
+	return b.String()
+}
+
+func (a *ActiveChecksComponent) getActiveSorted() []*CheckStatus {
+	var active []*CheckStatus
+
+	cutoff := time.Now().Add(-5 * time.Second)
+	for _, status := range a.Checks {
+		if status.IsActive && status.LastUpdate.After(cutoff) {
+			active = append(active, status)
+		}
+	}
+
+	// Sort by position
+	sort.Slice(active, func(i, j int) bool {
+		return active[i].Position < active[j].Position
+	})
+
+	return active
+}
+
+// =============================================================================
+// FOOTER COMPONENT
+// =============================================================================
+
+// FooterComponent displays help text and controls
+type FooterComponent struct {
+	Hints   []string
+	Version string
+}
+
+func (f *FooterComponent) Render() string {
+	hints := f.Hints
+	if len(hints) == 0 {
+		hints = []string{"press q to quit"}
+	}
+
+	// Add version to hints if available
+	if f.Version != "" {
+		hints = append(hints, fmt.Sprintf("v%s", f.Version))
+	}
+
+	content := strings.Join(hints, "  •  ")
+	return FooterStyle.Render(content)
+}
+
+// =============================================================================
+// DEBUG LOG COMPONENT
+// =============================================================================
+
+// DebugLogComponent shows recent debug messages
+type DebugLogComponent struct {
+	Messages []string
+	MaxLines int
+}
+
+func (d *DebugLogComponent) Render() string {
+	if len(d.Messages) == 0 {
+		return ""
+	}
+
+	maxLines := d.MaxLines
+	if maxLines <= 0 {
+		maxLines = 10
+	}
+
+	// Take last N messages
+	start := 0
+	if len(d.Messages) > maxLines {
+		start = len(d.Messages) - maxLines
+	}
+	messages := d.Messages[start:]
+
+	var b strings.Builder
+	b.WriteString(dimStyle.Render("Debug Log"))
+	b.WriteString("\n\n")
+
+	for _, msg := range messages {
+		// Colorize based on content
+		style := dimStyle
+		if strings.Contains(strings.ToLower(msg), "error") ||
+		   strings.Contains(strings.ToLower(msg), "fail") {
 			style = ErrorStyle
-		} else if strings.Contains(strings.ToLower(line), "warning") {
+		} else if strings.Contains(strings.ToLower(msg), "success") ||
+		          strings.Contains(strings.ToLower(msg), "working") {
+			style = SuccessStyle
+		} else if strings.Contains(strings.ToLower(msg), "warn") {
 			style = WarningStyle
 		}
 
-		builder.WriteString(style.Render(line) + "\n")
+		b.WriteString(style.Render("  " + msg))
+		b.WriteString("\n")
 	}
 
-	return builder.String()
-}
-
-// Helper functions
-func extractMethod(url string) string {
-	method := "REQUEST"
-	urlLower := strings.ToLower(url)
-
-	if strings.Contains(urlLower, "http://") {
-		return "HTTP"
-	} else if strings.Contains(urlLower, "https://") {
-		return "HTTPS"
-	} else if strings.Contains(urlLower, "socks4") {
-		return "SOCKS4"
-	} else if strings.Contains(urlLower, "socks5") {
-		return "SOCKS5"
-	}
-
-	// Try to extract HTTP method from URL if it's formatted as "METHOD URL"
-	urlParts := strings.SplitN(url, " ", 2)
-	if len(urlParts) > 1 {
-		return strings.ToUpper(urlParts[0])
-	}
-
-	return method
+	return lipgloss.NewStyle().
+		Border(thinBorderStyle).
+		BorderForeground(lipgloss.Color(ColorBorderDim)).
+		Padding(1, 1).
+		Width(DefaultWidth).
+		Render(b.String())
 }

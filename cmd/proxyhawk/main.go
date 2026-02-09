@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/progress"
+	"github.com/charmbracelet/bubbles/timer"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/ResistanceIsUseless/ProxyHawk/internal/config"
@@ -42,6 +43,13 @@ type AppState struct {
 	mutex       sync.Mutex   // Mutex to protect shared state
 	updateChan  chan tea.Msg // Channel for sending updates to the UI
 
+	// Terminal dimensions
+	width  int
+	height int
+
+	// Timer for UI updates
+	ticker timer.Model
+
 	// Graceful shutdown support
 	ctx          context.Context
 	cancel       context.CancelFunc
@@ -65,8 +73,23 @@ type AppState struct {
 }
 
 // Define custom message types
-type tickMsg struct{}
 type progressUpdateMsg struct{}
+
+// Worker message types
+type checkingStartedMsg struct{}
+
+type proxyCheckStartedMsg struct {
+	proxy string
+}
+
+type proxyCheckCompleteMsg struct {
+	proxy  string
+	result *proxy.ProxyResult
+}
+
+type allChecksCompleteMsg struct {
+	totalChecked int
+}
 
 func main() {
 	// Parse command line flags
@@ -105,6 +128,10 @@ func main() {
 	// Protocol flags
 	enableHTTP2 := flag.Bool("http2", false, "Enable HTTP/2 protocol detection and support")
 	enableHTTP3 := flag.Bool("http3", false, "Enable HTTP/3 protocol detection and support")
+
+	// Check mode flags
+	checkMode := flag.String("mode", "basic", "Check mode: basic (connectivity only), intense (advanced security checks), vulns (vulnerability scanning)")
+	enableAdvancedChecks := flag.Bool("advanced", false, "Enable advanced security checks (overrides mode)")
 
 	// Discovery flags
 	discoverMode := flag.Bool("discover", false, "Enable discovery mode to find proxy candidates")
@@ -252,6 +279,53 @@ func main() {
 		cfg.EnableHTTP3 = true
 	}
 
+	// Apply check mode settings
+	if *enableAdvancedChecks {
+		// Explicit --advanced flag enables all checks
+		cfg.AdvancedChecks.TestSSRF = true
+		cfg.AdvancedChecks.TestHostHeaderInjection = true
+		cfg.AdvancedChecks.TestProtocolSmuggling = true
+		cfg.AdvancedChecks.TestDNSRebinding = true
+		cfg.AdvancedChecks.TestCachePoisoning = true
+		cfg.AdvancedChecks.TestIPv6 = true
+	} else {
+		// Apply mode-based settings
+		switch strings.ToLower(*checkMode) {
+		case "basic":
+			// Basic mode: connectivity checks only (all tests disabled)
+			cfg.AdvancedChecks.TestSSRF = false
+			cfg.AdvancedChecks.TestHostHeaderInjection = false
+			cfg.AdvancedChecks.TestProtocolSmuggling = false
+			cfg.AdvancedChecks.TestDNSRebinding = false
+			cfg.AdvancedChecks.TestCachePoisoning = false
+			cfg.AdvancedChecks.TestIPv6 = false
+		case "intense":
+			// Intense mode: core security checks (fast tests only)
+			cfg.AdvancedChecks.TestSSRF = true
+			cfg.AdvancedChecks.TestHostHeaderInjection = true
+			cfg.AdvancedChecks.TestProtocolSmuggling = true
+			cfg.AdvancedChecks.TestDNSRebinding = false // Too slow for default intense
+			cfg.AdvancedChecks.TestCachePoisoning = false // Too slow for default intense
+			cfg.AdvancedChecks.TestIPv6 = true
+		case "vulns":
+			// Vulns mode: all vulnerability checks enabled (includes slow tests)
+			cfg.AdvancedChecks.TestSSRF = true
+			cfg.AdvancedChecks.TestHostHeaderInjection = true
+			cfg.AdvancedChecks.TestProtocolSmuggling = true
+			cfg.AdvancedChecks.TestDNSRebinding = true
+			cfg.AdvancedChecks.TestCachePoisoning = true
+			cfg.AdvancedChecks.TestIPv6 = true
+		default:
+			logger.Warn("Invalid check mode specified, using basic", "mode", *checkMode)
+			cfg.AdvancedChecks.TestSSRF = false
+			cfg.AdvancedChecks.TestHostHeaderInjection = false
+			cfg.AdvancedChecks.TestProtocolSmuggling = false
+			cfg.AdvancedChecks.TestDNSRebinding = false
+			cfg.AdvancedChecks.TestCachePoisoning = false
+			cfg.AdvancedChecks.TestIPv6 = false
+		}
+	}
+
 	// Override discovery settings with CLI flags
 	if *discoverCountries != "" {
 		cfg.Discovery.Countries = strings.Split(*discoverCountries, ",")
@@ -375,15 +449,11 @@ func main() {
 		progress.WithoutPercentage(),
 	)
 
-	view := &ui.View{
-		Progress: p,
-		Total:    len(proxies),
-		DisplayMode: ui.ViewDisplayMode{
-			IsVerbose: *verbose,                                                                                  // Only use verbose flag
-			IsDebug:   *debug || cfg.AdvancedChecks.TestProtocolSmuggling || cfg.AdvancedChecks.TestDNSRebinding, // Use debug mode if flag or advanced checks are enabled
-		},
-		ActiveChecks: make(map[string]*ui.CheckStatus),
-	}
+	view := ui.NewView()
+	view.Progress = p
+	view.Total = len(proxies)
+	view.Version = help.GetVersion()
+	view.SetMode(*verbose, *debug || cfg.AdvancedChecks.TestProtocolSmuggling || cfg.AdvancedChecks.TestDNSRebinding)
 
 	// Set up graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
@@ -424,6 +494,7 @@ func main() {
 		progressIndicator: progressIndicator,
 		metricsCollector:  metricsCollector,
 		configWatcher:     configWatcher,
+		ticker:            timer.NewWithInterval(100*time.Millisecond, 100*time.Millisecond),
 	}
 
 	// Start shutdown handler goroutine
@@ -470,7 +541,7 @@ func main() {
 		state.startCheckingNoUI()
 	} else {
 		// Start the UI
-		program := tea.NewProgram(state)
+		program := tea.NewProgram(state, tea.WithAltScreen(), tea.WithMouseCellMotion())
 
 		// Start a goroutine to forward messages from updateChan to the program
 		go func() {
@@ -532,89 +603,136 @@ func processResults(state *AppState) {
 }
 
 // Tea model implementation
+
+// startCheckingCmd wraps the proxy checking goroutine in a tea.Cmd
+func (s *AppState) startCheckingCmd() tea.Cmd {
+	return func() tea.Msg {
+		// Run in goroutine so it doesn't block
+		go func() {
+			s.startChecking()
+			// Send completion message when done
+			s.updateChan <- allChecksCompleteMsg{totalChecked: len(s.proxies)}
+		}()
+		// Return immediately with a started message
+		return checkingStartedMsg{}
+	}
+}
+
 func (s *AppState) Init() tea.Cmd {
-	// Start proxy checking
-	go s.startChecking()
-	// Start a ticker to update the UI regularly
-	return tea.Tick(time.Millisecond*100, func(time.Time) tea.Msg {
-		return tickMsg{}
-	})
+	// Start proxy checking and timer in parallel
+	return tea.Batch(
+		s.startCheckingCmd(),
+		s.ticker.Init(),
+	)
 }
 
 func (s *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmds []tea.Cmd
+
+	// Always update the ticker
+	var cmd tea.Cmd
+	s.ticker, cmd = s.ticker.Update(msg)
+	cmds = append(cmds, cmd)
+
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		// Handle terminal resize
+		s.width = msg.Width
+		s.height = msg.Height
+
+		// Update progress bar width (account for padding/borders)
+		if msg.Width > 4 {
+			s.view.Progress.Width = msg.Width - 4
+		}
+
+		return s, tea.Batch(cmds...)
+
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "q", "Q", "ctrl+c":
+			// Cancel context to stop workers
+			s.cancel()
 			return s, tea.Quit
 		}
-	case tickMsg, progressUpdateMsg:
-		// Update progress bar
+
+	case checkingStartedMsg:
+		// Checking has started, just continue
+		if s.debug {
+			s.view.AddDebugMessage("[INFO] Proxy checking started\n")
+		}
+		return s, tea.Batch(cmds...)
+
+	case proxyCheckCompleteMsg:
+		// Handle completed proxy check - incremental update
 		s.mutex.Lock()
+		s.results = append(s.results, msg.result)
+		s.view.Current++
+
+		// Incremental metrics - O(1) instead of O(n)
+		if msg.result.Working {
+			s.view.Working++
+		} else {
+			s.view.Failed++
+		}
+
+		// Running average for speed
+		if msg.result.Speed > 0 {
+			// Simple running average
+			oldAvg := s.view.AvgSpeed
+			n := len(s.results)
+			s.view.AvgSpeed = oldAvg + (msg.result.Speed-oldAvg)/time.Duration(n)
+		}
+
+		// Update progress
 		progress := float64(s.view.Current) / float64(s.view.Total)
 		progressCmd := s.view.Progress.SetPercent(progress)
 
-		// Update other metrics
-		s.view.Metrics.ActiveJobs = 0
-		for _, status := range s.view.ActiveChecks {
-			if status.IsActive && time.Since(status.LastUpdate) < 5*time.Second {
-				s.view.Metrics.ActiveJobs++
-			}
-		}
-
-		// Calculate success rate
-		workingProxies := 0
-		for _, result := range s.results {
-			if result.Working {
-				workingProxies++
-			}
-		}
-		if s.view.Current > 0 {
-			s.view.Metrics.SuccessRate = float64(workingProxies) / float64(s.view.Current) * 100
-		}
-
-		// Calculate average speed
-		var totalSpeed time.Duration
-		var speedCount int
-		for _, result := range s.results {
-			if result.Speed > 0 {
-				totalSpeed += result.Speed
-				speedCount++
-			}
-		}
-		if speedCount > 0 {
-			s.view.Metrics.AvgSpeed = totalSpeed / time.Duration(speedCount)
-		}
-
-		// Update metrics if enabled
-		if s.metricsCollector != nil {
-			s.metricsCollector.SetActiveChecks(s.view.Metrics.ActiveJobs)
-			s.metricsCollector.SetQueueSize(s.view.Metrics.QueueSize)
-			s.metricsCollector.SetWorkersActive(s.concurrency) // This could be made more dynamic
-		}
-
 		s.mutex.Unlock()
 
-		// Continue the ticker for regular updates
-		return s, tea.Batch(
-			progressCmd,
-			tea.Tick(time.Millisecond*100, func(time.Time) tea.Msg {
-				return tickMsg{}
-			}),
-		)
+		cmds = append(cmds, progressCmd)
+		return s, tea.Batch(cmds...)
+
+	case allChecksCompleteMsg:
+		// All checks complete, can quit or show completion
+		if s.debug {
+			s.view.AddDebugMessage(fmt.Sprintf("[COMPLETE] All %d proxies checked\n", msg.totalChecked))
+		}
+		return s, tea.Batch(cmds...)
+
+	case timer.TickMsg, progressUpdateMsg:
+		// Update spinner every tick
+		s.view.SpinnerIdx++
+
+		// Update metrics collector if enabled (light operation)
+		if s.metricsCollector != nil {
+			s.mutex.Lock()
+			activeCount := s.view.CountActive()
+			queueSize := len(s.proxies) - s.view.Current - activeCount
+			if queueSize < 0 {
+				queueSize = 0
+			}
+			s.metricsCollector.SetActiveChecks(activeCount)
+			s.metricsCollector.SetQueueSize(queueSize)
+			s.metricsCollector.SetWorkersActive(s.concurrency)
+			s.mutex.Unlock()
+		}
+
+		// Just refresh the UI, metrics are updated incrementally
+		return s, tea.Batch(cmds...)
 	}
 
-	// Update spinner every time the UI updates
-	s.view.SpinnerIdx++
-
-	return s, nil
+	return s, tea.Batch(cmds...)
 }
 
 func (s *AppState) View() string {
-	if s.view.DisplayMode.IsDebug {
+	// Lock while reading view state to prevent race conditions
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	if s.view.Mode == ui.ModeDebug {
 		return s.view.RenderDebug()
 	}
-	if s.view.DisplayMode.IsVerbose {
+	if s.view.Mode == ui.ModeVerbose {
 		return s.view.RenderVerbose()
 	}
 	return s.view.RenderDefault()
@@ -624,18 +742,13 @@ func (s *AppState) startChecking() {
 	var wg sync.WaitGroup
 	proxyChan := make(chan string)
 
-	// Set initial queue size
-	s.mutex.Lock()
-	s.view.Metrics.QueueSize = len(s.proxies)
-	s.mutex.Unlock()
-
 	// Send initial update
 	s.updateChan <- progressUpdateMsg{}
 
 	if s.debug {
 		s.mutex.Lock()
-		s.view.DebugInfo += fmt.Sprintf("[DEBUG] Starting proxy checks with concurrency: %d\n", s.concurrency)
-		s.view.DebugInfo += fmt.Sprintf("[DEBUG] Total proxies to check: %d\n", len(s.proxies))
+		s.view.AddDebugMessage(fmt.Sprintf("[DEBUG] Starting proxy checks with concurrency: %d\n", s.concurrency))
+		s.view.AddDebugMessage(fmt.Sprintf("[DEBUG] Total proxies to check: %d\n", len(s.proxies)))
 		s.mutex.Unlock()
 
 		// Send update
@@ -650,7 +763,7 @@ func (s *AppState) startChecking() {
 			defer func() {
 				if r := recover(); r != nil {
 					s.mutex.Lock()
-					s.view.DebugInfo += fmt.Sprintf("[ERROR] Worker %d panicked: %v\n", workerID, r)
+					s.view.AddDebugMessage(fmt.Sprintf("[ERROR] Worker %d panicked: %v\n", workerID, r))
 					s.mutex.Unlock()
 
 					// Send update
@@ -661,7 +774,7 @@ func (s *AppState) startChecking() {
 
 			if s.debug {
 				s.mutex.Lock()
-				s.view.DebugInfo += fmt.Sprintf("[DEBUG] Worker %d started\n", workerID)
+				s.view.AddDebugMessage(fmt.Sprintf("[DEBUG] Worker %d started\n", workerID))
 				s.mutex.Unlock()
 
 				// Send update
@@ -674,7 +787,7 @@ func (s *AppState) startChecking() {
 				case <-s.ctx.Done():
 					if s.debug {
 						s.mutex.Lock()
-						s.view.DebugInfo += fmt.Sprintf("[DEBUG] Worker %d cancelled\n", workerID)
+						s.view.AddDebugMessage(fmt.Sprintf("[DEBUG] Worker %d cancelled\n", workerID))
 						s.mutex.Unlock()
 						s.updateChan <- progressUpdateMsg{}
 					}
@@ -693,18 +806,15 @@ func (s *AppState) startChecking() {
 				s.view.ActiveChecks[proxy] = status
 
 				// Update queue size when starting a check
-				s.view.Metrics.QueueSize = len(s.proxies) - s.view.Current - s.view.Metrics.ActiveJobs
-				if s.view.Metrics.QueueSize < 0 {
-					s.view.Metrics.QueueSize = 0
-				}
-				s.mutex.Unlock()
-
+				// Queue size tracked in metrics
+				// Queue size tracked in metrics
+				// Queue size tracked in metrics
 				// Send update
 				s.updateChan <- progressUpdateMsg{}
 
 				if s.debug {
 					s.mutex.Lock()
-					s.view.DebugInfo += fmt.Sprintf("[DEBUG] Worker %d checking: %s\n", workerID, proxy)
+					s.view.AddDebugMessage(fmt.Sprintf("[DEBUG] Worker %d checking: %s\n", workerID, proxy))
 					s.mutex.Unlock()
 
 					// Send update
@@ -745,10 +855,7 @@ func (s *AppState) startChecking() {
 								errorMsg = errorMsg[:97] + "..."
 							}
 						}
-						s.view.DebugInfo += fmt.Sprintf("[DEBUG] Worker %d failed: %s - %s\n",
-							workerID,
-							proxy,
-							errorMsg)
+						s.view.AddDebugMessage(fmt.Sprintf("[DEBUG] Worker %d failed: %s - %s\n", workerID, proxy, errorMsg))
 						s.mutex.Unlock()
 
 						// Send update
@@ -763,12 +870,9 @@ func (s *AppState) startChecking() {
 					}
 
 					// Update queue size when a job is marked as inactive
-					s.view.Metrics.QueueSize = len(s.proxies) - s.view.Current - s.view.Metrics.ActiveJobs
-					if s.view.Metrics.QueueSize < 0 {
-						s.view.Metrics.QueueSize = 0
-					}
-					s.mutex.Unlock()
-
+				// Queue size tracked in metrics
+				// Queue size tracked in metrics
+				// Queue size tracked in metrics
 					// Send update
 					s.updateChan <- progressUpdateMsg{}
 
@@ -777,10 +881,7 @@ func (s *AppState) startChecking() {
 
 				if s.debug {
 					s.mutex.Lock()
-					s.view.DebugInfo += fmt.Sprintf("[DEBUG] Worker %d success: %s (%s)\n",
-						workerID,
-						proxy,
-						result.Type)
+					s.view.AddDebugMessage(fmt.Sprintf("[DEBUG] Worker %d success: %s (%s)\n", workerID, proxy, result.Type))
 					s.mutex.Unlock()
 
 					// Send update
@@ -795,7 +896,7 @@ func (s *AppState) startChecking() {
 
 			if s.debug {
 				s.mutex.Lock()
-				s.view.DebugInfo += fmt.Sprintf("[DEBUG] Worker %d finished\n", workerID)
+				s.view.AddDebugMessage(fmt.Sprintf("[DEBUG] Worker %d finished\n", workerID))
 				s.mutex.Unlock()
 
 				// Send update
@@ -807,7 +908,7 @@ func (s *AppState) startChecking() {
 	// Feed proxies to workers
 	if s.debug {
 		s.mutex.Lock()
-		s.view.DebugInfo += fmt.Sprintf("[DEBUG] Starting to feed proxies to workers\n")
+		s.view.AddDebugMessage(fmt.Sprintf("[DEBUG] Starting to feed proxies to workers\n"))
 		s.mutex.Unlock()
 
 		// Send update
@@ -820,7 +921,7 @@ func (s *AppState) startChecking() {
 		case <-s.ctx.Done():
 			if s.debug {
 				s.mutex.Lock()
-				s.view.DebugInfo += fmt.Sprintf("[DEBUG] Proxy feeding cancelled\n")
+				s.view.AddDebugMessage(fmt.Sprintf("[DEBUG] Proxy feeding cancelled\n"))
 				s.mutex.Unlock()
 				s.updateChan <- progressUpdateMsg{}
 			}
@@ -829,7 +930,7 @@ func (s *AppState) startChecking() {
 		default:
 			if s.debug {
 				s.mutex.Lock()
-				s.view.DebugInfo += fmt.Sprintf("[DEBUG] Sending proxy to channel: %s\n", proxy)
+				s.view.AddDebugMessage(fmt.Sprintf("[DEBUG] Sending proxy to channel: %s\n", proxy))
 				s.mutex.Unlock()
 			}
 			proxyChan <- proxy
@@ -838,7 +939,7 @@ func (s *AppState) startChecking() {
 
 	if s.debug {
 		s.mutex.Lock()
-		s.view.DebugInfo += fmt.Sprintf("[DEBUG] All proxies sent to channel, closing\n")
+		s.view.AddDebugMessage(fmt.Sprintf("[DEBUG] All proxies sent to channel, closing\n"))
 		s.mutex.Unlock()
 
 		// Send update
@@ -848,7 +949,7 @@ func (s *AppState) startChecking() {
 
 	if s.debug {
 		s.mutex.Lock()
-		s.view.DebugInfo += fmt.Sprintf("[DEBUG] Waiting for workers to finish\n")
+		s.view.AddDebugMessage(fmt.Sprintf("[DEBUG] Waiting for workers to finish\n"))
 		s.mutex.Unlock()
 
 		// Send update
@@ -874,7 +975,7 @@ func (s *AppState) startChecking() {
 		// All workers finished normally
 		if s.debug {
 			s.mutex.Lock()
-			s.view.DebugInfo += fmt.Sprintf("[DEBUG] All workers finished successfully\n")
+			s.view.AddDebugMessage(fmt.Sprintf("[DEBUG] All workers finished successfully\n"))
 			s.mutex.Unlock()
 
 			// Send update
@@ -884,8 +985,8 @@ func (s *AppState) startChecking() {
 		// Timeout occurred, some workers might be stuck
 		if s.debug {
 			s.mutex.Lock()
-			s.view.DebugInfo += fmt.Sprintf("[DEBUG] WARNING: Timed out waiting for some workers after %v\n", timeout)
-			s.view.DebugInfo += fmt.Sprintf("[DEBUG] Proceeding with available results\n")
+			s.view.AddDebugMessage(fmt.Sprintf("[DEBUG] WARNING: Timed out waiting for some workers after %v\n", timeout))
+			s.view.AddDebugMessage(fmt.Sprintf("[DEBUG] Proceeding with available results\n"))
 			s.mutex.Unlock()
 
 			// Send update
@@ -898,11 +999,15 @@ func (s *AppState) startChecking() {
 }
 
 func (s *AppState) processResult(result *proxy.ProxyResult) {
+	// Send message to Update() instead of modifying state directly
+	s.updateChan <- proxyCheckCompleteMsg{
+		proxy:  result.ProxyURL,
+		result: result,
+	}
+
+	// Still need to update UI status for active checks display
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
-
-	s.results = append(s.results, result)
-	s.view.Current++
 
 	// Convert check results
 	uiCheckResults := make([]ui.CheckResult, len(result.CheckResults))
@@ -937,15 +1042,11 @@ func (s *AppState) processResult(result *proxy.ProxyResult) {
 
 	s.view.ActiveChecks[result.ProxyURL] = status
 
-	// Update queue size - calculate remaining proxies to check
-	s.view.Metrics.QueueSize = len(s.proxies) - s.view.Current - s.view.Metrics.ActiveJobs
-	if s.view.Metrics.QueueSize < 0 {
-		s.view.Metrics.QueueSize = 0
-	}
+	// Queue size is tracked in metrics collector
 
 	// Add debug info to the main debug output if in debug mode
 	if s.debug && result.DebugInfo != "" {
-		s.view.DebugInfo += result.DebugInfo
+		s.view.AddDebugMessage(result.DebugInfo)
 	}
 }
 

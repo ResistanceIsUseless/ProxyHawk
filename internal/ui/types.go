@@ -6,58 +6,92 @@ import (
 	"github.com/charmbracelet/bubbles/progress"
 )
 
-// View represents the main UI state and orchestrates component rendering
+// ViewMode represents the display mode
+type ViewMode int
+
+const (
+	ModeDefault ViewMode = iota
+	ModeVerbose
+	ModeDebug
+)
+
+// View represents the main UI state
 type View struct {
 	// Progress tracking
 	Progress progress.Model
 	Total    int
 	Current  int
 
+	// Counters
+	Working int
+	Failed  int
+
 	// Performance metrics
-	Metrics ViewMetrics
+	AvgSpeed time.Duration
 
 	// Active state
 	ActiveChecks map[string]*CheckStatus
 	SpinnerIdx   int
 
-	// Display configuration
-	DisplayMode ViewDisplayMode
+	// Display mode
+	Mode ViewMode
 
-	// Layout configuration
-	Layout LayoutConfig
+	// Debug messages
+	DebugMessages []string
 
-	// Debug information
-	DebugInfo string
-}
-
-// ViewMetrics contains performance and execution metrics
-type ViewMetrics struct {
-	ActiveJobs  int
-	QueueSize   int
-	SuccessRate float64
-	AvgSpeed    time.Duration
-}
-
-// ViewDisplayMode contains display configuration
-type ViewDisplayMode struct {
-	IsVerbose bool
-	IsDebug   bool
+	// Version information
+	Version string
 }
 
 // NewView creates a new View with sensible defaults
 func NewView() *View {
 	return &View{
-		Progress:     progress.New(),
-		ActiveChecks: make(map[string]*CheckStatus),
-		Metrics:      ViewMetrics{},
-		DisplayMode:  ViewDisplayMode{},
-		Layout:       CalculateLayout(DefaultWidth+20, 30), // Default layout
+		Progress:      progress.New(progress.WithDefaultGradient()),
+		ActiveChecks:  make(map[string]*CheckStatus),
+		DebugMessages: make([]string, 0),
+		Mode:          ModeDefault,
 	}
 }
 
-// UpdateLayout updates the view's layout configuration
-func (v *View) UpdateLayout(termWidth, termHeight int) {
-	v.Layout = CalculateLayout(termWidth, termHeight)
+// SetMode sets the display mode
+func (v *View) SetMode(verbose, debug bool) {
+	if debug {
+		v.Mode = ModeDebug
+	} else if verbose {
+		v.Mode = ModeVerbose
+	} else {
+		v.Mode = ModeDefault
+	}
+}
+
+// AddDebugMessage adds a debug message to the log
+func (v *View) AddDebugMessage(msg string) {
+	v.DebugMessages = append(v.DebugMessages, msg)
+	// Keep only last 50 messages
+	if len(v.DebugMessages) > 50 {
+		v.DebugMessages = v.DebugMessages[len(v.DebugMessages)-50:]
+	}
+}
+
+// UpdateProgress updates the progress bar
+func (v *View) UpdateProgress(current, total int) {
+	v.Current = current
+	v.Total = total
+	if total > 0 {
+		v.Progress.SetPercent(float64(current) / float64(total))
+	}
+}
+
+// CountActive returns the number of currently active checks
+func (v *View) CountActive() int {
+	count := 0
+	cutoff := time.Now().Add(-5 * time.Second)
+	for _, status := range v.ActiveChecks {
+		if status.IsActive && status.LastUpdate.After(cutoff) {
+			count++
+		}
+	}
+	return count
 }
 
 // IsValid checks if the View state is valid
@@ -66,19 +100,6 @@ func (v *View) IsValid() bool {
 		v.Current >= 0 &&
 		v.Current <= v.Total &&
 		v.ActiveChecks != nil
-}
-
-// GetCompletionPercentage returns the completion percentage
-func (v *View) GetCompletionPercentage() float64 {
-	if v.Total == 0 {
-		return 0
-	}
-	return float64(v.Current) / float64(v.Total) * 100
-}
-
-// HasActiveChecks returns true if there are any active checks
-func (v *View) HasActiveChecks() bool {
-	return len(v.ActiveChecks) > 0
 }
 
 // CheckStatus represents the current status of a proxy check

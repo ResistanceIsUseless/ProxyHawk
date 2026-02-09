@@ -347,6 +347,7 @@ func main() {
 			cfg.AdvancedChecks.TestNginxVulnerabilities = true
 			cfg.AdvancedChecks.TestApacheVulnerabilities = true
 			cfg.AdvancedChecks.TestKongVulnerabilities = true
+			cfg.AdvancedChecks.TestGenericVulnerabilities = true
 		default:
 			logger.Warn("Invalid check mode specified, using basic", "mode", *checkMode)
 			cfg.AdvancedChecks.TestSSRF = false

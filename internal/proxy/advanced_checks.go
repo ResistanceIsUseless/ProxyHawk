@@ -11,17 +11,18 @@ import (
 
 // AdvancedChecks represents advanced security check settings
 type AdvancedChecks struct {
-	TestProtocolSmuggling   bool     `yaml:"test_protocol_smuggling"`
-	TestDNSRebinding        bool     `yaml:"test_dns_rebinding"`
-	TestIPv6                bool     `yaml:"test_ipv6"`
-	TestHTTPMethods         []string `yaml:"test_http_methods"`
-	TestCachePoisoning      bool     `yaml:"test_cache_poisoning"`
-	TestHostHeaderInjection bool     `yaml:"test_host_header_injection"`
-	TestSSRF                 bool     `yaml:"test_ssrf"`
-	DisableInteractsh        bool     `yaml:"disable_interactsh"` // Set to true to disable Interactsh and use basic checks
-	TestNginxVulnerabilities bool     `yaml:"test_nginx_vulnerabilities"` // Test for nginx-specific vulnerabilities
-	TestApacheVulnerabilities bool    `yaml:"test_apache_vulnerabilities"` // Test for Apache mod_proxy vulnerabilities
-	TestKongVulnerabilities   bool    `yaml:"test_kong_vulnerabilities"` // Test for Kong API Gateway vulnerabilities
+	TestProtocolSmuggling     bool     `yaml:"test_protocol_smuggling"`
+	TestDNSRebinding          bool     `yaml:"test_dns_rebinding"`
+	TestIPv6                  bool     `yaml:"test_ipv6"`
+	TestHTTPMethods           []string `yaml:"test_http_methods"`
+	TestCachePoisoning        bool     `yaml:"test_cache_poisoning"`
+	TestHostHeaderInjection   bool     `yaml:"test_host_header_injection"`
+	TestSSRF                  bool     `yaml:"test_ssrf"`
+	DisableInteractsh         bool     `yaml:"disable_interactsh"`            // Set to true to disable Interactsh and use basic checks
+	TestNginxVulnerabilities  bool     `yaml:"test_nginx_vulnerabilities"`    // Test for nginx-specific vulnerabilities
+	TestApacheVulnerabilities bool     `yaml:"test_apache_vulnerabilities"`   // Test for Apache mod_proxy vulnerabilities
+	TestKongVulnerabilities   bool     `yaml:"test_kong_vulnerabilities"`     // Test for Kong API Gateway vulnerabilities
+	TestGenericVulnerabilities bool    `yaml:"test_generic_vulnerabilities"` // Test for generic proxy misconfigurations
 }
 
 // AdvancedCheckResult represents the result of advanced security checks
@@ -257,6 +258,21 @@ func (c *Checker) performAdvancedChecks(client *http.Client, result *ProxyResult
 		}
 	}
 
+	// Generic Vulnerability Tests
+	if c.config.AdvancedChecks.TestGenericVulnerabilities {
+		if c.debug {
+			result.DebugInfo += "[GENERIC VULNS] Running generic proxy misconfiguration checks\n"
+		}
+		genericResults := c.performGenericVulnerabilityChecks(client, result)
+		result.GenericVulnerabilities = genericResults
+
+		if c.debug {
+			result.DebugInfo += fmt.Sprintf("[GENERIC VULNS] Complete - Found: open-proxy=%t, xff-bypass=%t, cache-poison=%t, linkerd-ssrf=%t, actuator=%t\n",
+				genericResults.OpenProxyToLocalhost, genericResults.XForwardedForBypass, genericResults.CachePoisonVulnerable,
+				genericResults.LinkerdSSRF, genericResults.SpringBootActuator)
+		}
+	}
+
 	return nil
 }
 
@@ -271,7 +287,8 @@ func (c *Checker) hasAdvancedChecks() bool {
 		checks.TestSSRF ||
 		checks.TestNginxVulnerabilities ||
 		checks.TestApacheVulnerabilities ||
-		checks.TestKongVulnerabilities
+		checks.TestKongVulnerabilities ||
+		checks.TestGenericVulnerabilities
 }
 
 // Individual check implementations

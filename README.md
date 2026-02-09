@@ -5,7 +5,7 @@ A comprehensive proxy checker and validator with **advanced security testing** c
 ## 🚀 Major Updates
 - ✅ **Production-ready** with comprehensive security testing
 - ✅ **Proxy Fingerprinting** - Identify 12+ proxy types (nginx, apache, haproxy, kong, cloudflare, etc.)
-- ✅ **Vulnerability Scanning** - 20+ CVE checks for nginx, Apache, and Kong API Gateway
+- ✅ **Vulnerability Scanning** - 26+ vulnerability checks including 6 critical CVEs (CVSS 9.0+)
 - ✅ **Three-Tier Check Modes** - Choose between basic, intense, or vulns scanning modes
 - ✅ **Enhanced Anonymity Detection** - Elite/Anonymous/Transparent/Compromised classification with 10+ header checks
 - ✅ **Proxy Chain Detection** - Automatic detection of proxy-behind-proxy configurations
@@ -106,6 +106,14 @@ make docker-run    # Run in container
 - **Routes Enumeration**: Exposes all configured routes and their configurations
 - **Services Enumeration**: Lists all backend services
 - **Consumers Enumeration** (Critical): Indicates complete authentication bypass
+
+**Generic Proxy Misconfigurations:**
+- **Open Proxy to Localhost**: Tests access to internal services (SSH, MySQL, PostgreSQL, Redis, Elasticsearch, MongoDB) on 20+ localhost/IPv6 variations
+- **X-Forwarded-For ACL Bypass**: Tests 15+ protected paths with trusted IP spoofing for ACL evasion
+- **CVE-2022-46169** (Critical, CVSS 9.8): Cacti RCE via X-Forwarded-For authentication bypass
+- **Web Cache Poisoning**: Tests 7+ unkeyed headers (X-Forwarded-Host, X-Original-URL, X-Rewrite-URL) for cache poisoning vulnerabilities
+- **Linkerd SSRF**: Tests l5d-dtab header manipulation for internal service access (SSH, MySQL, Redis, metadata services)
+- **Spring Boot Actuator Exposure**: Detects 16+ exposed management endpoints (/env, /heapdump, /jolokia, /shutdown, /gateway/routes)
 
 ### Advanced Features
 - **Enhanced Anonymity Detection**: Elite/Anonymous/Transparent/Compromised classification with IP leak detection
@@ -220,6 +228,7 @@ Security Testing:
   * Nginx vulnerability scanning (5 checks including CVE-2025-1974)
   * Apache mod_proxy vulnerability scanning (6 checks including CVE-2021-40438, CVE-2020-11984)
   * Kong API Gateway vulnerability scanning (5 checks for exposed admin APIs)
+  * Generic proxy misconfigurations (10 checks: open proxy, X-Forwarded-For bypass, CVE-2022-46169, cache poisoning, Linkerd SSRF, Spring Boot Actuator)
 
 Output Options:
 - -o: Output results to text file (includes all details and summary)
@@ -292,7 +301,7 @@ Enable intense mode with core security checks:
 ./proxyhawk -l proxies.txt -mode intense
 ```
 
-Enable full vulnerability scanning mode (20+ CVE checks):
+Enable full vulnerability scanning mode (26+ vulnerability checks including 6 critical CVEs):
 ```bash
 ./proxyhawk -l proxies.txt -mode vulns -d
 ```

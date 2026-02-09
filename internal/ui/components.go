@@ -124,20 +124,8 @@ func (p *ProgressComponent) Render() string {
 		return ""
 	}
 
-	var b strings.Builder
-
-	// Progress bar
-	b.WriteString(p.Progress.View())
-	b.WriteString("\n")
-
-	// Count and percentage on same line
-	percentage := FormatPercentage(p.Current, p.Total)
-	count := FormatCount(p.Current, p.Total)
-	b.WriteString(dimStyle.Render(count))
-	b.WriteString(" ")
-	b.WriteString(MetricValueStyle.Render(percentage))
-
-	return ProgressStyle.Render(b.String())
+	// Just render the progress bar without any text - stats bar shows the counter
+	return p.Progress.View()
 }
 
 // =============================================================================
@@ -265,7 +253,7 @@ func (a *ActiveChecksComponent) renderCheck(status *CheckStatus, spinner string)
 func (a *ActiveChecksComponent) renderCheckDetails(status *CheckStatus) string {
 	var b strings.Builder
 
-	// Check results summary
+	// Check results summary with more detail
 	if len(status.CheckResults) > 0 {
 		success := 0
 		failed := 0
@@ -278,6 +266,7 @@ func (a *ActiveChecksComponent) renderCheckDetails(status *CheckStatus) string {
 		}
 
 		b.WriteString("  ")
+		b.WriteString(dimStyle.Render("Checks: "))
 		if success > 0 {
 			b.WriteString(SuccessStyle.Render(fmt.Sprintf("✓ %d", success)))
 		}
@@ -286,6 +275,19 @@ func (a *ActiveChecksComponent) renderCheckDetails(status *CheckStatus) string {
 				b.WriteString(" ")
 			}
 			b.WriteString(ErrorStyle.Render(fmt.Sprintf("✗ %d", failed)))
+		}
+
+		// Show cloud provider in verbose mode
+		if status.CloudProvider != "" {
+			b.WriteString(" " + dimStyle.Render(fmt.Sprintf("• Cloud: %s", status.CloudProvider)))
+		}
+
+		// Show internal access flags
+		if status.InternalAccess {
+			b.WriteString(" " + WarningStyle.Render("• Internal Access"))
+		}
+		if status.MetadataAccess {
+			b.WriteString(" " + WarningStyle.Render("• Metadata Access"))
 		}
 
 		// Show individual results in debug mode
@@ -300,6 +302,8 @@ func (a *ActiveChecksComponent) renderCheckDetails(status *CheckStatus) string {
 				b.WriteString(" " + dimStyle.Render(r.URL))
 				if r.Error != "" {
 					b.WriteString(" " + ErrorStyle.Render(r.Error))
+				} else if r.StatusCode > 0 {
+					b.WriteString(dimStyle.Render(fmt.Sprintf(" [%d]", r.StatusCode)))
 				}
 			}
 		}

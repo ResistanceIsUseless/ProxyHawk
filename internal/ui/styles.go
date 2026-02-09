@@ -1,254 +1,223 @@
 package ui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"fmt"
+	"github.com/charmbracelet/lipgloss"
+)
 
-// Color palette
+// Modern color palette using 256-color terminal codes
+// Based on a clean, professional dark theme
 const (
-	ColorPrimary   = "87"  // Cyan
-	ColorSecondary = "39"  // Blue
-	ColorSuccess   = "42"  // Green
-	ColorError     = "196" // Red
-	ColorWarning   = "214" // Orange
-	ColorInfo      = "244" // Gray
-	ColorDebug     = "208" // Orange
-	ColorMuted     = "252" // Light Gray
-	ColorAccent    = "99"  // Purple
-	ColorMetric    = "207" // Pink
-	ColorSpinner   = "86"  // Bright Green
+	// Primary colors
+	ColorPrimary   = "#61AFEF" // Soft blue
+	ColorSecondary = "#98C379" // Soft green
+	ColorAccent    = "#C678DD" // Soft purple
+
+	// Status colors
+	ColorSuccess = "#98C379" // Green
+	ColorWarning = "#E5C07B" // Yellow
+	ColorError   = "#E06C75" // Red
+	ColorInfo    = "#61AFEF" // Blue
+
+	// Neutral colors
+	ColorText      = "#ABB2BF" // Light gray
+	ColorTextDim   = "#5C6370" // Dim gray
+	ColorBorder    = "#3E4451" // Dark gray
+	ColorBorderDim = "#2C323C" // Darker gray
+
+	// Special status
+	ColorActive  = "#61AFEF" // Blue
+	ColorPending = "#E5C07B" // Yellow
 )
 
 // Layout constants
 const (
-	DefaultWidth  = 50
-	MinWidth      = 30
+	DefaultWidth  = 80
+	MinWidth      = 60
 	MaxWidth      = 120
-	WideWidth     = 80
-	BorderPadding = 1
+	ContentPadding = 1
+	SectionSpacing = 1
 )
 
-// Layout configuration
-type LayoutConfig struct {
-	TerminalWidth  int
-	TerminalHeight int
-	ContentWidth   int
-	UseCompact     bool
-}
-
-// CalculateLayout determines the optimal layout based on terminal size
-func CalculateLayout(termWidth, termHeight int) LayoutConfig {
-	config := LayoutConfig{
-		TerminalWidth:  termWidth,
-		TerminalHeight: termHeight,
-	}
-	
-	// Determine content width based on terminal size
-	if termWidth <= MinWidth {
-		config.ContentWidth = MinWidth
-		config.UseCompact = true
-	} else if termWidth >= MaxWidth {
-		config.ContentWidth = MaxWidth
-		config.UseCompact = false
-	} else if termWidth >= WideWidth {
-		config.ContentWidth = WideWidth
-		config.UseCompact = false
-	} else {
-		config.ContentWidth = DefaultWidth
-		config.UseCompact = termHeight < 20 // Use compact mode on short terminals
-	}
-	
-	return config
-}
-
-// ApplyLayoutToStyle applies layout configuration to a lipgloss style
-func ApplyLayoutToStyle(style lipgloss.Style, config LayoutConfig) lipgloss.Style {
-	return style.Width(config.ContentWidth)
-}
-
-// GetStylesForLayout returns configured styles for the given layout
-func GetStylesForLayout(config LayoutConfig) struct {
-	Header     lipgloss.Style
-	Progress   lipgloss.Style
-	Status     lipgloss.Style
-	Metric     lipgloss.Style
-	Debug      lipgloss.Style
-} {
-	return struct {
-		Header     lipgloss.Style
-		Progress   lipgloss.Style
-		Status     lipgloss.Style
-		Metric     lipgloss.Style
-		Debug      lipgloss.Style
-	}{
-		Header:     ApplyLayoutToStyle(HeaderStyle, config),
-		Progress:   ApplyLayoutToStyle(ProgressStyle, config),
-		Status:     ApplyLayoutToStyle(StatusBlockStyle, config),
-		Metric:     ApplyLayoutToStyle(MetricBlockStyle, config),
-		Debug:      ApplyLayoutToStyle(DebugBlockStyle, config),
-	}
-}
-
-// Base styles
+// Base styles for consistent look
 var (
-	baseBlockStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			Padding(0, BorderPadding)
+	// Base text styles
+	baseStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color(ColorText))
 
-	baseTitleStyle = lipgloss.NewStyle().
-			Bold(true).
-			Padding(0, BorderPadding).
-			Align(lipgloss.Center)
+	boldStyle = baseStyle.Copy().Bold(true)
+
+	dimStyle = baseStyle.Copy().
+			Foreground(lipgloss.Color(ColorTextDim))
+
+	// Border styles
+	borderStyle = lipgloss.RoundedBorder()
+
+	thinBorderStyle = lipgloss.Border{
+		Top:         "─",
+		Bottom:      "─",
+		Left:        "│",
+		Right:       "│",
+		TopLeft:     "╭",
+		TopRight:    "╮",
+		BottomLeft:  "╰",
+		BottomRight: "╯",
+	}
 )
 
 // Component styles
 var (
-	HeaderStyle = baseTitleStyle.Copy().
+	// Header - App title
+	HeaderStyle = lipgloss.NewStyle().
+			Bold(true).
 			Foreground(lipgloss.Color(ColorPrimary)).
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color(ColorPrimary)).
+			Border(thinBorderStyle).
+			BorderForeground(lipgloss.Color(ColorBorder)).
+			Padding(0, 2).
+			Width(DefaultWidth).
+			Align(lipgloss.Center)
+
+	// Stats bar - Key metrics at a glance
+	StatsBarStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color(ColorText)).
+			Border(thinBorderStyle, false, false, true, false).
+			BorderForeground(lipgloss.Color(ColorBorderDim)).
+			Padding(0, 1).
 			Width(DefaultWidth)
 
-	ProgressStyle = baseBlockStyle.Copy().
-			BorderForeground(lipgloss.Color(ColorSecondary)).
+	// Progress section
+	ProgressStyle = lipgloss.NewStyle().
+			Padding(0, 1).
 			Width(DefaultWidth)
 
-	StatusBlockStyle = baseBlockStyle.Copy().
-			BorderForeground(lipgloss.Color(ColorAccent)).
-			Width(DefaultWidth)
+	// Active checks section
+	ChecksSectionStyle = lipgloss.NewStyle().
+				Border(thinBorderStyle, true, false, false, false).
+				BorderForeground(lipgloss.Color(ColorBorderDim)).
+				Padding(1, 1).
+				Width(DefaultWidth)
 
-	MetricBlockStyle = baseBlockStyle.Copy().
-			BorderForeground(lipgloss.Color(ColorMetric)).
-			Width(DefaultWidth)
-
-	DebugBlockStyle = baseBlockStyle.Copy().
-			BorderForeground(lipgloss.Color(ColorDebug)).
-			Width(DefaultWidth)
-
-	DebugHeaderStyle = baseTitleStyle.Copy().
-			Foreground(lipgloss.Color(ColorDebug)).
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color(ColorDebug)).
-			Width(DefaultWidth)
+	// Footer - Controls and hints
+	FooterStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color(ColorTextDim)).
+			Border(thinBorderStyle, true, false, false, false).
+			BorderForeground(lipgloss.Color(ColorBorderDim)).
+			Padding(0, 1).
+			Width(DefaultWidth).
+			Align(lipgloss.Center)
 )
 
-// Text styles
+// Text semantic styles
 var (
-	SuccessStyle = lipgloss.NewStyle().
+	// Status colors
+	SuccessStyle = baseStyle.Copy().
 			Foreground(lipgloss.Color(ColorSuccess)).
 			Bold(true)
 
-	ErrorStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color(ColorError)).
-			Bold(true)
-
-	WarningStyle = lipgloss.NewStyle().
+	WarningStyle = baseStyle.Copy().
 			Foreground(lipgloss.Color(ColorWarning)).
 			Bold(true)
 
-	InfoStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color(ColorInfo)).
-			Italic(true)
-
-	DebugTextStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color(ColorMuted)).
-			Bold(false)
-
-	MetricLabelStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color(ColorInfo)).
+	ErrorStyle = baseStyle.Copy().
+			Foreground(lipgloss.Color(ColorError)).
 			Bold(true)
 
-	MetricValueStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color(ColorSpinner)).
-			Bold(true)
-
-	SpinnerStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color(ColorSpinner))
-
-	ProxyURLStyle = lipgloss.NewStyle().
-			Bold(true)
-
-	StatusActiveStyle = lipgloss.NewStyle().
+	InfoStyle = baseStyle.Copy().
 			Foreground(lipgloss.Color(ColorInfo))
 
-	StatusCompleteStyle = lipgloss.NewStyle().
+	// Metric styles
+	MetricLabelStyle = dimStyle.Copy()
+
+	MetricValueStyle = boldStyle.Copy().
+				Foreground(lipgloss.Color(ColorPrimary))
+
+	MetricGoodStyle = boldStyle.Copy().
 			Foreground(lipgloss.Color(ColorSuccess))
+
+	MetricBadStyle = boldStyle.Copy().
+			Foreground(lipgloss.Color(ColorError))
+
+	// Proxy display
+	ProxyURLStyle = boldStyle.Copy().
+			Foreground(lipgloss.Color(ColorText))
+
+	ProxyTypeStyle = baseStyle.Copy().
+			Foreground(lipgloss.Color(ColorAccent))
+
+	ProxySpeedStyle = baseStyle.Copy().
+			Foreground(lipgloss.Color(ColorSecondary))
+
+	// Active status
+	ActiveStyle = baseStyle.Copy().
+			Foreground(lipgloss.Color(ColorActive))
+
+	PendingStyle = baseStyle.Copy().
+			Foreground(lipgloss.Color(ColorPending))
 )
 
-// Spinner animation frames
-var SpinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
-
-// Status icons
+// Status indicators - Clean, minimal symbols
 const (
-	IconSpinner = "⌛"
+	IconSpinner = "⠿"
 	IconSuccess = "✓"
 	IconError   = "✗"
-	IconWarning = "⚠"
-	IconWorking = "🔧"
-	IconSecure  = "🔒"
-	IconCloud   = "☁️"
-	IconAlert   = "⚠️"
+	IconWarning = "!"
+	IconCheck   = "●"
+	IconEmpty   = "○"
+	IconActive  = "▶"
+	IconDone    = "■"
 )
 
-// GetStatusIcon returns an appropriate icon for the given status
-func GetStatusIcon(success, partial, complete bool) string {
-	if !complete {
-		return IconSpinner
+// Spinner frames - Simple and smooth
+var SpinnerFrames = []string{
+	"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏",
+}
+
+// GetStatusIcon returns a clean status icon
+func GetStatusIcon(working, failed, inProgress bool) string {
+	if inProgress {
+		return IconActive
 	}
-	if success {
+	if working {
 		return IconSuccess
 	}
-	if partial {
-		return IconWarning
+	if failed {
+		return IconError
 	}
-	return IconError
+	return IconEmpty
 }
 
-// GetStatusStyle returns an appropriate style for the given status
-func GetStatusStyle(success, partial, complete bool) lipgloss.Style {
-	if !complete {
-		return InfoStyle
+// GetStatusStyle returns appropriate styling for status
+func GetStatusStyle(working, failed, inProgress bool) lipgloss.Style {
+	if inProgress {
+		return ActiveStyle
 	}
-	if success {
+	if working {
 		return SuccessStyle
 	}
-	if partial {
-		return WarningStyle
-	}
-	return ErrorStyle
-}
-
-// HTTP status code helpers
-func GetHTTPStatusText(code int) string {
-	switch {
-	case code >= 100 && code < 200:
-		return "Info"
-	case code >= 200 && code < 300:
-		return "OK"
-	case code >= 300 && code < 400:
-		return "Redirect"
-	case code == 401:
-		return "Unauthorized"
-	case code == 403:
-		return "Forbidden"
-	case code == 404:
-		return "Not Found"
-	case code >= 400 && code < 500:
-		return "Client Error"
-	case code >= 500:
-		return "Server Error"
-	default:
-		return "Unknown"
-	}
-}
-
-func GetHTTPStatusStyle(code int) lipgloss.Style {
-	switch {
-	case code >= 200 && code < 300:
-		return SuccessStyle
-	case code >= 300 && code < 400:
-		return WarningStyle
-	case code >= 400:
+	if failed {
 		return ErrorStyle
-	default:
-		return InfoStyle
 	}
+	return dimStyle
+}
+
+// FormatDuration formats a duration for display
+func FormatDuration(d lipgloss.Style, ms int64) string {
+	if ms < 1000 {
+		return d.Render(lipgloss.NewStyle().Render(fmt.Sprintf("%dms", ms)))
+	}
+	return d.Render(lipgloss.NewStyle().Render(fmt.Sprintf("%.2fs", float64(ms)/1000.0)))
+}
+
+// FormatPercentage formats a percentage for display
+func FormatPercentage(value, total int) string {
+	if total == 0 {
+		return "0%"
+	}
+	pct := float64(value) / float64(total) * 100
+	return fmt.Sprintf("%.1f%%", pct)
+}
+
+// FormatCount formats a count comparison
+func FormatCount(value, total int) string {
+	return fmt.Sprintf("%d/%d", value, total)
 }

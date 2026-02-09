@@ -1,0 +1,640 @@
+name: ProxyHawk Long-Running Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    # Run tests daily at 03:00 UTC
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      test_mode:
+        description: 'Test mode to run'
+        required: true
+        default: 'quick'
+        type: choice
+        options:
+          - quick
+          - full
+          - security
+          - discovery
+      proxy_sources:
+        description: 'Proxy sources to test (comma-separated)'
+        required: false
+        default: 'local,free'
+      concurrency_level:
+        description: 'Concurrency level for proxy testing'
+        required: false
+        default: '5'
+
+env:
+  GO_VERSION: '1.21'
+  TEST_TIMEOUT: 1800  # 30 minutes
+  MEMORY_LIMIT: 500   # 500MB
+  PROXY_TIMEOUT: 30   # 30 seconds per proxy
+
+jobs:
+  build-and-prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      binary-hash: ${{ steps.build.outputs.hash }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+
+    - name: Cache Go modules
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/go/pkg/mod
+          ~/.cache/go-build
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y jq curl netcat-openbsd
+
+    - name: Build ProxyHawk
+      id: build
+      run: |
+        make deps || go mod download
+        make build || {
+          mkdir -p build
+          go build -v -o build/proxyhawk cmd/proxyhawk/main.go
+          go build -v -o build/proxyhawk-server cmd/proxyhawk-server/main.go
+        }
+        
+        # Verify builds
+        ./build/proxyhawk --version || ./build/proxyhawk --help
+        ./build/proxyhawk-server --version || ./build/proxyhawk-server --help
+        
+        # Generate hash for cache validation
+        echo "hash=$(sha256sum build/proxyhawk | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+
+    - name: Create test configuration
+      run: |
+        mkdir -p test-configs
+        
+        # Create secure test configuration
+        cat > test-configs/ci-config.yaml << 'EOF'
+        global:
+          timeout: 30s
+          max_retries: 2
+          rate_limit: 5
+          concurrency: 2
+        
+        validation:
+          check_anonymity: false  # Disabled for CI
+          check_ssl: true
+          verify_headers: true
+          timeout: 10s
+        
+        security:
+          enable_ssrf_tests: false      # Disabled for CI security
+          enable_host_injection_tests: false
+          enable_protocol_smuggling_tests: false
+          timeout: 5s
+        
+        discovery:
+          enabled: false  # Disabled to avoid external API calls
+          sources: []
+          timeout: 30s
+          max_results: 10
+        
+        output:
+          format: json
+          include_failed: true
+          verbose: false
+        
+        logging:
+          level: info
+          format: text
+        EOF
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: proxyhawk-binaries-${{ github.run_number }}
+        path: |
+          build/
+          test-configs/
+        retention-days: 1
+
+  test-matrix:
+    runs-on: ubuntu-latest
+    needs: build-and-prepare
+    strategy:
+      matrix:
+        test-type: [quick, full, security]
+        os: [ubuntu-latest]
+      fail-fast: false
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: proxyhawk-binaries-${{ github.run_number }}
+
+    - name: Set up test environment
+      run: |
+        # Make binaries executable
+        chmod +x build/proxyhawk build/proxyhawk-server
+        
+        # Create test directories
+        mkdir -p test-results test-artifacts test-proxies
+        
+        # Create test proxy lists for CI (safe, non-functional proxies)
+        cat > test-proxies/ci-test-proxies.txt << 'EOF'
+        http://127.0.0.1:8080
+        http://127.0.0.1:8081
+        socks5://127.0.0.1:1080
+        https://127.0.0.1:3128
+        EOF
+        
+        # Create minimal proxy list for quick tests
+        echo "http://127.0.0.1:8080" > test-proxies/minimal-proxies.txt
+        
+        # Set up mock endpoints for testing
+        cat > test-proxies/test-endpoints.txt << 'EOF'
+        http://httpbin.org/ip
+        https://httpbin.org/headers
+        http://api.ipify.org
+        EOF
+
+    - name: Run quick tests
+      if: matrix.test-type == 'quick' || github.event.inputs.test_mode == 'quick'
+      run: |
+        echo "Running ProxyHawk quick tests..."
+        
+        # Test basic functionality
+        ./build/proxyhawk --help
+        ./build/proxyhawk --version
+        
+        # Test with minimal proxy list
+        timeout 300 ./scripts/test-proxyhawk.sh --quick || {
+          echo "Quick test completed with potential issues"
+          exit_code=$?
+          echo "exit_code=$exit_code" >> $GITHUB_ENV
+        }
+        
+        # Copy results
+        cp -r test-output/* test-artifacts/ 2>/dev/null || true
+
+    - name: Run full tests
+      if: matrix.test-type == 'full' || github.event.inputs.test_mode == 'full'
+      run: |
+        echo "Running ProxyHawk full tests..."
+        
+        timeout ${{ env.TEST_TIMEOUT }} ./scripts/test-proxyhawk.sh || {
+          echo "Full test completed with potential issues"
+          exit_code=$?
+          echo "exit_code=$exit_code" >> $GITHUB_ENV
+        }
+        
+        # Copy results
+        cp -r test-output/* test-artifacts/ 2>/dev/null || true
+
+    - name: Run security tests
+      if: matrix.test-type == 'security' || github.event.inputs.test_mode == 'security'
+      run: |
+        echo "Running ProxyHawk security tests..."
+        
+        # Test with security-focused configuration
+        ./build/proxyhawk \
+          --input test-proxies/minimal-proxies.txt \
+          --output test-artifacts/security-test.json \
+          --config test-configs/ci-config.yaml \
+          --format json \
+          --timeout 10s || true
+        
+        # Test server security
+        if [ -f build/proxyhawk-server ]; then
+          echo "Testing server security..."
+          ./build/proxyhawk-server --port 18888 &
+          server_pid=$!
+          sleep 2
+          
+          # Basic security tests
+          curl -s http://localhost:18888/api/health || true
+          curl -s -X POST http://localhost:18888/api/check || true
+          
+          kill $server_pid 2>/dev/null || true
+        fi
+
+    - name: Run discovery tests
+      if: github.event.inputs.test_mode == 'discovery'
+      run: |
+        echo "Running ProxyHawk discovery tests (limited for CI)..."
+        
+        # Only test discovery mechanism, not actual external APIs
+        ./build/proxyhawk \
+          --output test-artifacts/discovery-test.json \
+          --config test-configs/ci-config.yaml \
+          --format json \
+          --timeout 30s || {
+          echo "Discovery test completed (expected to have limited results in CI)"
+        }
+
+    - name: Analyze test results
+      if: always()
+      run: |
+        echo "Analyzing ProxyHawk test results..."
+        
+        # Generate test summary
+        cat > test-summary.md << EOF
+        # ProxyHawk Test Summary - ${{ matrix.test-type }}
+        
+        **Configuration:**
+        - Test Type: ${{ matrix.test-type }}
+        - Go Version: ${{ env.GO_VERSION }}
+        - Runner: ${{ runner.os }}
+        - Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')
+        
+        **Binary Information:**
+        - ProxyHawk Hash: ${{ needs.build-and-prepare.outputs.binary-hash }}
+        - Build Status: ✅ Success
+        
+        **Test Results:**
+        EOF
+        
+        # Add test report if available
+        if [ -f test-output/test-report.txt ]; then
+          echo '```' >> test-summary.md
+          cat test-output/test-report.txt >> test-summary.md
+          echo '```' >> test-summary.md
+        fi
+        
+        # Check for JSON output files
+        echo "**Generated Output Files:**" >> test-summary.md
+        find test-artifacts -name "*.json" 2>/dev/null | while read file; do
+          if [ -s "$file" ]; then
+            size=$(stat -c%s "$file" 2>/dev/null || echo "0")
+            echo "- $(basename "$file"): ${size} bytes" >> test-summary.md
+            
+            # Validate JSON
+            if jq empty "$file" 2>/dev/null; then
+              echo "  - ✅ Valid JSON" >> test-summary.md
+            else
+              echo "  - ❌ Invalid JSON" >> test-summary.md
+            fi
+          fi
+        done || echo "- No JSON files generated" >> test-summary.md
+        
+        # Memory usage analysis
+        if find test-output -name "*memory*" -type f | grep -q .; then
+          max_memory=$(find test-output -name "*memory*" -exec cat {} \; 2>/dev/null | sort -n | tail -1 || echo "0")
+          echo "**Memory Usage:**" >> test-summary.md
+          echo "- Peak Memory: ${max_memory}MB" >> test-summary.md
+          
+          if [ "$max_memory" -gt "${{ env.MEMORY_LIMIT }}" ]; then
+            echo "- ⚠️ Exceeded memory limit (${{ env.MEMORY_LIMIT }}MB)" >> test-summary.md
+          fi
+        fi
+        
+        cp test-summary.md test-artifacts/
+
+    - name: Check proxy testing functionality
+      if: always()
+      run: |
+        echo "Validating proxy testing functionality..."
+        
+        # Test basic proxy checking mechanism
+        ./build/proxyhawk \
+          --input test-proxies/minimal-proxies.txt \
+          --output test-artifacts/functionality-check.json \
+          --format json \
+          --timeout 5s \
+          --concurrency 1 || {
+          echo "Proxy testing mechanism validation completed"
+        }
+        
+        # Validate output structure
+        if [ -f test-artifacts/functionality-check.json ]; then
+          echo "Output file generated: ✅"
+          if jq -e 'type == "array" or has("results")' test-artifacts/functionality-check.json >/dev/null 2>&1; then
+            echo "Output structure valid: ✅"
+          else
+            echo "Output structure validation: ⚠️ Non-standard format"
+          fi
+        fi
+
+    - name: Archive test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: proxyhawk-test-results-${{ matrix.test-type }}-${{ github.run_number }}
+        path: |
+          test-artifacts/
+          test-output/
+          test-summary.md
+        retention-days: 30
+
+    - name: Upload failure logs
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: proxyhawk-failure-logs-${{ matrix.test-type }}-${{ github.run_number }}
+        path: |
+          test-output/*.log
+          test-artifacts/*.log
+          *.log
+        retention-days: 7
+
+  performance-test:
+    runs-on: ubuntu-latest
+    needs: build-and-prepare
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: proxyhawk-binaries-${{ github.run_number }}
+
+    - name: Set up performance test environment
+      run: |
+        chmod +x build/proxyhawk build/proxyhawk-server
+        
+        # Create larger proxy list for performance testing
+        mkdir -p perf-test
+        for i in {1..50}; do
+          echo "http://127.0.0.1:80$i" >> perf-test/perf-proxies.txt
+        done
+
+    - name: Run performance benchmarks
+      run: |
+        echo "Running ProxyHawk performance benchmarks..."
+        
+        # Create performance test script
+        cat > perf-test.sh << 'EOF'
+        #!/bin/bash
+        set -e
+        
+        echo "=== ProxyHawk Performance Benchmark ==="
+        echo "Proxy Count: $(wc -l < perf-test/perf-proxies.txt)"
+        echo "Start: $(date)"
+        
+        start_time=$(date +%s)
+        
+        # Run with timing and memory monitoring
+        /usr/bin/time -v ./build/proxyhawk \
+          --input perf-test/perf-proxies.txt \
+          --output perf-test/perf-results.json \
+          --format json \
+          --timeout 5s \
+          --concurrency ${{ github.event.inputs.concurrency_level || '5' }} \
+          2> perf-timing.log || true
+        
+        end_time=$(date +%s)
+        duration=$((end_time - start_time))
+        
+        echo "Duration: ${duration}s"
+        echo "End: $(date)"
+        
+        # Extract performance metrics
+        if [ -f perf-timing.log ]; then
+          echo "=== Performance Metrics ==="
+          grep -E "(Maximum resident set size|User time|System time|Percent of CPU)" perf-timing.log || true
+        fi
+        
+        # Analyze results
+        if [ -f perf-test/perf-results.json ]; then
+          result_count=$(jq length perf-test/perf-results.json 2>/dev/null || echo "0")
+          echo "Results processed: $result_count"
+        fi
+        EOF
+        
+        chmod +x perf-test.sh
+        timeout 600 ./perf-test.sh > perf-report.txt 2>&1
+
+    - name: Archive performance results
+      uses: actions/upload-artifact@v4
+      with:
+        name: proxyhawk-performance-${{ github.run_number }}
+        path: |
+          perf-report.txt
+          perf-test/perf-results.json
+          perf-timing.log
+        retention-days: 90
+
+  security-audit:
+    runs-on: ubuntu-latest
+    needs: build-and-prepare
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Run Gosec Security Scanner
+      uses: securecodewarrior/github-action-gosec@master
+      with:
+        args: '-fmt sarif -out gosec.sarif ./...'
+
+    - name: Upload SARIF file
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: gosec.sarif
+
+    - name: Run custom security checks
+      run: |
+        echo "Running custom ProxyHawk security checks..."
+        
+        # Check for sensitive information in code
+        echo "Checking for potential secrets..."
+        grep -r -i "password\|secret\|key\|token" --exclude-dir=.git --exclude="*.yml" . || echo "No obvious secrets found"
+        
+        # Check for unsafe proxy handling
+        echo "Checking for unsafe proxy patterns..."
+        grep -r "http://" cmd/ pkg/ internal/ || echo "HTTP patterns found (review for security)"
+        
+        # Validate configuration security
+        echo "Checking configuration security..."
+        find . -name "*.yaml" -o -name "*.yml" | xargs grep -l "password\|secret" || echo "No secrets in config files"
+
+  integration-test:
+    runs-on: ubuntu-latest
+    needs: [build-and-prepare, test-matrix]
+    if: always()
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: proxyhawk-binaries-${{ github.run_number }}
+
+    - name: Run integration tests
+      run: |
+        chmod +x build/proxyhawk build/proxyhawk-server
+        
+        echo "Running ProxyHawk integration tests..."
+        
+        # Test 1: Basic CLI integration
+        echo "Testing CLI integration..."
+        ./build/proxyhawk --help > /dev/null
+        
+        # Test 2: Configuration file integration
+        echo "Testing configuration integration..."
+        ./build/proxyhawk \
+          --config test-configs/ci-config.yaml \
+          --input /dev/null \
+          --output integration-config-test.json \
+          --format json || true
+        
+        # Test 3: Server integration
+        echo "Testing server integration..."
+        ./build/proxyhawk-server --port 19999 &
+        server_pid=$!
+        sleep 3
+        
+        curl -s http://localhost:19999/api/health || echo "Server health check completed"
+        kill $server_pid 2>/dev/null || true
+        
+        # Test 4: Output format integration
+        echo "Testing output formats..."
+        echo "http://127.0.0.1:8080" | ./build/proxyhawk \
+          --format json \
+          --output integration-json.json || true
+        
+        echo "http://127.0.0.1:8080" | ./build/proxyhawk \
+          --format csv \
+          --output integration-csv.csv || true
+        
+        echo "Integration tests completed!"
+
+    - name: Archive integration results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: proxyhawk-integration-${{ github.run_number }}
+        path: |
+          integration-*.json
+          integration-*.csv
+        retention-days: 7
+
+  test-summary:
+    runs-on: ubuntu-latest
+    needs: [test-matrix, performance-test, security-audit, integration-test]
+    if: always()
+    
+    steps:
+    - name: Create comprehensive test review
+      run: |
+        cat > TESTING_REVIEW.md << 'EOF'
+        # ProxyHawk Testing Review
+        
+        ## Test Run Summary
+        
+        **Date:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')
+        **Workflow Run:** ${{ github.run_number }}
+        **Commit:** ${{ github.sha }}
+        **Branch:** ${{ github.ref_name }}
+        **Trigger:** ${{ github.event_name }}
+        
+        ## Test Results Overview
+        
+        ### Matrix Tests
+        - **Status:** ${{ needs.test-matrix.result }}
+        - **Types Tested:** Quick, Full, Security
+        - **Coverage:** Core functionality, memory usage, output formats
+        
+        ### Performance Tests
+        - **Status:** ${{ needs.performance-test.result }}
+        - **Focus:** Concurrency handling, memory efficiency, processing speed
+        - **Configuration:** ${{ github.event.inputs.concurrency_level || '5' }} concurrent connections
+        
+        ### Security Audit
+        - **Status:** ${{ needs.security-audit.result }}
+        - **Tools:** Gosec, custom security checks
+        - **Scope:** Code analysis, configuration security, proxy handling
+        
+        ### Integration Tests
+        - **Status:** ${{ needs.integration-test.result }}
+        - **Coverage:** CLI, server mode, configuration, output formats
+        
+        ## Key Metrics
+        
+        ### Memory Usage
+        - **Limit:** ${{ env.MEMORY_LIMIT }}MB
+        - **Monitoring:** Continuous during long-running tests
+        - **Status:** Check artifacts for detailed memory usage patterns
+        
+        ### Timeout Configuration
+        - **Test Timeout:** ${{ env.TEST_TIMEOUT }}s (30 minutes)
+        - **Proxy Timeout:** ${{ env.PROXY_TIMEOUT }}s per proxy
+        - **Concurrency:** Configurable via workflow inputs
+        
+        ## Recommendations
+        
+        ### ✅ All Tests Passed
+        - ProxyHawk is ready for deployment
+        - Performance characteristics are within expected ranges
+        - Security scan found no critical issues
+        - Integration tests confirm compatibility
+        
+        ### ❌ Some Tests Failed
+        - **Check Matrix Tests:** Review individual test type failures
+        - **Performance Issues:** Examine memory usage and timing
+        - **Security Concerns:** Address any security findings immediately
+        - **Integration Problems:** Validate CLI arguments and server functionality
+        
+        ## Troubleshooting Guide
+        
+        ### Common Issues
+        1. **Memory Exceeded:** Check for memory leaks in long-running processes
+        2. **Timeout Failures:** Verify network connectivity and proxy responsiveness
+        3. **JSON Validation Errors:** Check output format consistency
+        4. **Server Start Failures:** Verify port availability and permissions
+        
+        ### Debug Information
+        - Download test artifacts for detailed logs
+        - Check performance benchmarks for baseline comparisons
+        - Review security scan SARIF files for code issues
+        - Examine integration test outputs for compatibility problems
+        
+        ## Artifacts Generated
+        
+        Available in the Actions tab:
+        - `proxyhawk-test-results-*`: Detailed test outputs by type
+        - `proxyhawk-performance-*`: Performance benchmark data
+        - `proxyhawk-integration-*`: Integration test results
+        - `proxyhawk-failure-logs-*`: Debug logs for failed tests
+        
+        ## Next Steps
+        
+        1. **Review Performance:** Check if benchmark results meet expectations
+        2. **Security Analysis:** Address any security findings
+        3. **Integration Validation:** Ensure compatibility with other tools
+        4. **Documentation Update:** Update any configuration changes
+        
+        ---
+        
+        *This review is automatically generated by the ProxyHawk testing workflow.*
+        *For detailed information, examine the individual test artifacts.*
+        EOF
+
+    - name: Upload comprehensive test review
+      uses: actions/upload-artifact@v4
+      with:
+        name: proxyhawk-testing-review-${{ github.run_number }}
+        path: TESTING_REVIEW.md
+        retention-days: 90

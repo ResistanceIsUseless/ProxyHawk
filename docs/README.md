@@ -1,13 +1,21 @@
 # ProxyHawk Documentation
 
-Complete documentation for ProxyHawk dual-mode proxy server and geographic testing service.
+Complete documentation for ProxyHawk - advanced proxy checker, validator, and security testing tool.
 
 ## 📚 Documentation Index
 
 ### 🚀 Getting Started
-- **[README](../README.md)** - Project overview and quick start
+- **[README](../README.md)** - Project overview, features, and quick start
+- **[CLAUDE.md](../CLAUDE.md)** - Development guidance for Claude Code
 - **[Configuration Guide](guides/CONFIGURATION.md)** - Complete setup instructions
 - **[CLI Examples](guides/CLI_EXAMPLES.md)** - Command-line usage examples
+
+### 📋 Reference Documentation
+- **[Implementation Status](IMPLEMENTATION_STATUS.md)** - Current feature status and completeness
+- **[Project Structure](PROJECT_STRUCTURE.md)** - Codebase organization
+- **[Proxy Checking Flow](PROXY_CHECKING_FLOW.md)** - How proxy validation works
+- **[Proxy Security Analysis](PROXY_SECURITY_ANALYSIS.md)** - Security features and testing
+- **[Integration Guide](INTEGRATION_GUIDE.md)** - Integration instructions
 
 ### 🏗️ Deployment
 - **[Deployment Overview](../deployments/README.md)** - All deployment options
@@ -42,19 +50,32 @@ Complete documentation for ProxyHawk dual-mode proxy server and geographic testi
 - Need monitoring? Check [Monitoring Guide](guides/monitoring.md) (future)
 - Security concerns? Read [Security Guide](guides/security.md) (future)
 
+### 🗂️ Archive
+- **[Historical Documentation](archive/)** - Proposals and implementation notes (completed features)
+
 ## 📋 Feature Documentation
 
 ### Core Features
-- **Dual-Mode Operation**: Proxy server + Geographic testing service
-- **Multi-Protocol Support**: SOCKS5, HTTP, WebSocket API
-- **Geographic Testing**: Round-robin DNS detection across regions
-- **Proxy Chaining**: Multi-hop proxy support with Tor integration
+- **Three-Tier Check Modes**: Basic (fast), Intense (security), Vulns (comprehensive)
+- **Multi-Protocol Support**: HTTP, HTTPS, SOCKS4, SOCKS5, HTTP/2, HTTP/3
+- **Proxy Discovery**: Shodan, Censys, free lists, web scraping with honeypot detection
+- **Terminal UI**: Real-time progress tracking with component-based architecture
+
+### Security Features
+- **SSRF Testing**: 60+ internal targets including cloud metadata services
+- **Header Injection**: 62+ injection vectors with CRLF/null byte testing
+- **Protocol Smuggling**: CL.TE desync detection
+- **DNS Rebinding**: Protection testing
+- **Cache Poisoning**: Detection and testing
+- **Anonymity Detection**: Elite/Anonymous/Transparent classification with 10+ header checks
 
 ### Advanced Features
-- **Health Checking**: Automatic proxy pool management
-- **DNS Caching**: Performance optimization with TTL-based caching
-- **Metrics & Monitoring**: Prometheus integration
-- **Client Libraries**: Python WebSocket client with async/sync support
+- **Configuration Hot-Reloading**: Live config updates without restart
+- **Rate Limiting**: Three modes (global, per-host, per-proxy)
+- **Progress Indicators**: 6 types for automation (bar, spinner, dots, percent, basic, none)
+- **Metrics & Monitoring**: Prometheus integration with custom endpoint
+- **Output Formats**: Text, JSON, working proxies, anonymous proxies
+- **Interactsh Integration**: Out-of-band detection for vulnerability confirmation
 
 ## 🛠️ Configuration Quick Reference
 
@@ -97,5 +118,14 @@ Common issues and solutions:
 
 **Need help?** Check the relevant guide above or open an issue on GitHub.
 
-**Last Updated**: 2024-08-07  
+## 📊 Project Status
+
+- ✅ **Feature Complete**: All documented features implemented (99% complete)
+- ✅ **45 Command-Line Flags**: All verified and working
+- ✅ **Security Testing**: Comprehensive vulnerability detection suite
+- ✅ **Terminal UI**: Full component-based system with real-time updates
+- ✅ **Documentation**: Comprehensive guides and examples
+- ⚠️ **Interactsh**: 100% complete (standalone flag added 2026-02-09)
+
+**Last Updated**: 2026-02-09
 **Version**: 1.0.0

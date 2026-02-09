@@ -84,6 +84,17 @@ type CheckResult struct {
 	BodySize   int64
 }
 
+// AnonymityLevel represents the anonymity level of a proxy
+type AnonymityLevel string
+
+const (
+	AnonymityNone        AnonymityLevel = "transparent" // Transparent proxy - real IP exposed
+	AnonymityBasic       AnonymityLevel = "anonymous"   // Anonymous proxy - proxy headers present
+	AnonymityElite       AnonymityLevel = "elite"       // High anonymous - no proxy headers
+	AnonymityCompromised AnonymityLevel = "compromised" // Leaks detected (WebRTC, DNS, etc.)
+	AnonymityUnknown     AnonymityLevel = "unknown"     // Anonymity check failed or not performed
+)
+
 // ProxyResult represents the comprehensive result of checking a proxy
 type ProxyResult struct {
 	Proxy                 string
@@ -95,8 +106,13 @@ type ProxyResult struct {
 	ProxyType             ProxyType
 	CheckResults          []CheckResult
 	IsAnonymous           bool
+	AnonymityLevel        AnonymityLevel // Detailed anonymity level
 	RealIP                string
 	ProxyIP               string
+	DetectedIP            string         // IP address detected during anonymity check
+	LeakingHeaders        []string       // Headers that leak information
+	ProxyChainDetected    bool           // Whether proxy-behind-proxy was detected
+	ProxyChainInfo        string         // Details about proxy chain
 	CloudProvider         string
 	InternalAccess        bool
 	MetadataAccess        bool
@@ -104,6 +120,7 @@ type ProxyResult struct {
 	AdvancedChecksPassed  bool
 	AdvancedChecksDetails map[string]interface{}
 	DebugInfo             string
+	SecurityWarnings      []string // Security warnings (e.g., TLS verification disabled)
 
 	// New fields for protocol support
 	SupportsHTTP  bool

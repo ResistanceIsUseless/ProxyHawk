@@ -132,6 +132,7 @@ func main() {
 	// Check mode flags
 	checkMode := flag.String("mode", "basic", "Check mode: basic (connectivity only), intense (advanced security checks), vulns (vulnerability scanning)")
 	enableAdvancedChecks := flag.Bool("advanced", false, "Enable advanced security checks (overrides mode)")
+	enableInteractsh := flag.Bool("interactsh", false, "Enable Interactsh for out-of-band detection (enhances security checks)")
 
 	// Discovery flags
 	discoverMode := flag.Bool("discover", false, "Enable discovery mode to find proxy candidates")
@@ -324,6 +325,12 @@ func main() {
 			cfg.AdvancedChecks.TestCachePoisoning = false
 			cfg.AdvancedChecks.TestIPv6 = false
 		}
+	}
+
+	// Apply Interactsh flag (if specified, disable the DisableInteractsh flag)
+	if *enableInteractsh {
+		cfg.AdvancedChecks.DisableInteractsh = false
+		logger.Info("Interactsh enabled for out-of-band detection")
 	}
 
 	// Override discovery settings with CLI flags

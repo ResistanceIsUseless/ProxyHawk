@@ -269,26 +269,56 @@ func (c *Checker) checkDNSRebinding(client *http.Client, testDomain string) (*Ch
 	// Apply rate limiting
 	c.applyRateLimit(testDomain, &ProxyResult{DebugInfo: ""})
 
-	req, err := http.NewRequest("GET", result.URL, nil)
+	// Use a real DNS rebinding test service
+	// This domain should first resolve to a public IP, then to 127.0.0.1
+	// Format: 7f000001.1time.<interactsh-domain> resolves to 127.0.0.1 after TTL expires
+	rebindingURL := fmt.Sprintf("http://%s", testDomain)
+
+	// First request - should succeed (resolves to public IP)
+	req1, err := http.NewRequest("GET", rebindingURL, nil)
 	if err != nil {
 		return result, err
 	}
-
-	// Add headers to test DNS rebinding
-	req.Header.Set("X-Forwarded-Host", testDomain)
-	req.Header.Set("Host", testDomain)
+	req1.Header.Set("User-Agent", c.config.UserAgent)
 
 	start := time.Now()
-	resp, err := client.Do(req)
+	resp1, err := client.Do(req1)
+	if err != nil {
+		result.Error = fmt.Sprintf("First request failed: %v", err)
+		return result, err
+	}
+	defer resp1.Body.Close()
+
+	// Small delay to allow DNS TTL to expire
+	time.Sleep(2 * time.Second)
+
+	// Second request - should fail if DNS rebinding protection works (resolves to 127.0.0.1)
+	req2, err := http.NewRequest("GET", rebindingURL, nil)
 	if err != nil {
 		result.Error = err.Error()
 		return result, err
 	}
-	defer resp.Body.Close()
+	req2.Header.Set("User-Agent", c.config.UserAgent)
 
+	resp2, err := client.Do(req2)
 	result.Speed = time.Since(start)
-	result.StatusCode = resp.StatusCode
-	result.Success = resp.StatusCode < 400
+
+	if err != nil {
+		// If second request fails, DNS rebinding protection likely works
+		result.Success = true
+		result.Error = "DNS rebinding protection appears effective"
+	} else {
+		defer resp2.Body.Close()
+		result.StatusCode = resp2.StatusCode
+		// If second request succeeds, proxy may be vulnerable to DNS rebinding
+		if resp2.StatusCode < 400 {
+			result.Success = false
+			result.Error = "Warning: DNS rebinding attack may be possible"
+		} else {
+			result.Success = true
+			result.Error = "DNS rebinding protection appears effective"
+		}
+	}
 
 	return result, nil
 }
@@ -653,54 +683,89 @@ func (c *Checker) testPortScanning(client *http.Client, details *[]string) bool 
 
 // testDNSRebindingSSRF tests basic DNS rebinding protection for SSRF
 func (c *Checker) testDNSRebindingSSRF(client *http.Client, details *[]string) bool {
-	// Test some known DNS rebinding test domains
+	// Use real DNS rebinding test domains that actually rebind
+	// These domains use DNS tricks to first resolve to a public IP, then to internal IPs
 	rebindingTests := []string{
-		"localhost.example.com",
-		"127.0.0.1.example.com", 
-		"192.168.1.1.example.com",
+		"make-127-0-0-1-rr.1u.ms", // Public service that rebinds to 127.0.0.1
+		"7f000001.rbndr.us",       // Another DNS rebinding service (resolves to 127.0.0.1)
 	}
-	
+
 	for _, domain := range rebindingTests {
-		req, err := http.NewRequest("GET", "http://"+domain, nil)
+		// First request - should succeed
+		req1, err := http.NewRequest("GET", "http://"+domain, nil)
 		if err != nil {
 			continue
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		req = req.WithContext(ctx)
-		
-		resp, err := client.Do(req)
-		cancel()
-		
-		if err == nil {
-			defer resp.Body.Close()
-			if resp.StatusCode < 400 {
-				*details = append(*details, fmt.Sprintf("DNS rebinding test %s succeeded", domain))
+		ctx1, cancel1 := context.WithTimeout(context.Background(), 3*time.Second)
+		req1 = req1.WithContext(ctx1)
+
+		resp1, err1 := client.Do(req1)
+		cancel1()
+
+		if err1 != nil {
+			continue // Skip if first request fails
+		}
+		resp1.Body.Close()
+
+		// Wait for DNS TTL to expire
+		time.Sleep(2 * time.Second)
+
+		// Second request - should fail if DNS rebinding protection works
+		req2, err := http.NewRequest("GET", "http://"+domain, nil)
+		if err != nil {
+			continue
+		}
+
+		ctx2, cancel2 := context.WithTimeout(context.Background(), 3*time.Second)
+		req2 = req2.WithContext(ctx2)
+
+		resp2, err2 := client.Do(req2)
+		cancel2()
+
+		if err2 == nil {
+			defer resp2.Body.Close()
+			if resp2.StatusCode < 400 {
+				*details = append(*details, fmt.Sprintf("DNS rebinding vulnerability: %s accessible after rebind", domain))
 				return true
 			}
 		}
 	}
-	
+
 	return false
 }
 
 // testAdvancedHeaderInjection tests more sophisticated header injection techniques
 func (c *Checker) testAdvancedHeaderInjection(client *http.Client, testDomain string, details *[]string) bool {
 	vulnerabilityFound := false
-	
+
+	// Use Interactsh for OOB callback validation if available
+	var interactshDomain string
+	if !c.config.AdvancedChecks.DisableInteractsh {
+		// If Interactsh is configured, we could use it for OOB callbacks
+		// For now, we'll use testDomain as a placeholder
+		// In production, this should integrate with interactsh-client
+		interactshDomain = testDomain
+	}
+
 	// Test multiple conflicting host headers
 	req, err := http.NewRequest("GET", fmt.Sprintf("http://%s", testDomain), nil)
 	if err == nil {
 		req.Host = testDomain
 		req.Header.Add("Host", "127.0.0.1")  // Duplicate Host header
 		req.Header.Set("X-Forwarded-Host", "169.254.169.254")
-		
+
+		// Add Interactsh callback URL if available
+		if interactshDomain != "" {
+			req.Header.Set("X-Callback-URL", fmt.Sprintf("http://%s/callback", interactshDomain))
+		}
+
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		req = req.WithContext(ctx)
-		
+
 		resp, err := client.Do(req)
 		cancel()
-		
+
 		if err == nil {
 			resp.Body.Close()
 			if resp.StatusCode < 400 {
@@ -709,7 +774,7 @@ func (c *Checker) testAdvancedHeaderInjection(client *http.Client, testDomain st
 			}
 		}
 	}
-	
+
 	// Test HTTP/1.0 Host header bypass
 	req, err = http.NewRequest("GET", fmt.Sprintf("http://%s", testDomain), nil)
 	if err == nil {
@@ -717,13 +782,13 @@ func (c *Checker) testAdvancedHeaderInjection(client *http.Client, testDomain st
 		req.ProtoMajor = 1
 		req.ProtoMinor = 0
 		req.Header.Set("Host", "127.0.0.1")
-		
+
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		req = req.WithContext(ctx)
-		
+
 		resp, err := client.Do(req)
 		cancel()
-		
+
 		if err == nil {
 			resp.Body.Close()
 			if resp.StatusCode < 400 {
@@ -732,27 +797,33 @@ func (c *Checker) testAdvancedHeaderInjection(client *http.Client, testDomain st
 			}
 		}
 	}
-	
-	// Test malformed host headers
+
+	// Test malformed host headers with CRLF and other injection vectors
 	malformedHosts := []string{
 		"127.0.0.1\r\nX-Injected: true",  // CRLF injection
 		"127.0.0.1\nX-Injected: true",    // LF injection
 		"127.0.0.1:80\x00",               // Null byte
 		"127.0.0.1:80 ",                  // Trailing space
 		"\t127.0.0.1",                    // Leading tab
+		"127.0.0.1\r\n\r\nGET /evil HTTP/1.1", // HTTP request smuggling attempt
 	}
-	
+
 	for _, malformedHost := range malformedHosts {
 		req, err := http.NewRequest("GET", fmt.Sprintf("http://%s", testDomain), nil)
 		if err == nil {
 			req.Host = malformedHost
-			
+
+			// Add Interactsh callback in malformed header if available
+			if interactshDomain != "" && !strings.Contains(malformedHost, "\r\n") {
+				req.Header.Set("X-Callback-URL", fmt.Sprintf("http://%s/callback", interactshDomain))
+			}
+
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			req = req.WithContext(ctx)
-			
+
 			resp, err := client.Do(req)
 			cancel()
-			
+
 			if err == nil {
 				resp.Body.Close()
 				if resp.StatusCode < 400 {
@@ -762,6 +833,40 @@ func (c *Checker) testAdvancedHeaderInjection(client *http.Client, testDomain st
 			}
 		}
 	}
-	
+
+	// Test additional header injection vectors
+	injectionHeaders := []struct {
+		name  string
+		value string
+	}{
+		{"X-Forwarded-For", "127.0.0.1\r\nX-Injected: true"},
+		{"X-Real-IP", "127.0.0.1\nX-Injected: true"},
+		{"X-Original-URL", "/admin\r\nX-Injected: true"},
+		{"X-Rewrite-URL", "/admin\r\nX-Injected: true"},
+		{"Referer", fmt.Sprintf("http://%s\r\nX-Injected: true", testDomain)},
+	}
+
+	for _, header := range injectionHeaders {
+		req, err := http.NewRequest("GET", fmt.Sprintf("http://%s", testDomain), nil)
+		if err == nil {
+			req.Header.Set(header.name, header.value)
+
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			req = req.WithContext(ctx)
+
+			resp, err := client.Do(req)
+			cancel()
+
+			if err == nil {
+				resp.Body.Close()
+				// Check if the injection was successful by looking for the injected header in response
+				if resp.Header.Get("X-Injected") == "true" {
+					vulnerabilityFound = true
+					*details = append(*details, fmt.Sprintf("CRLF injection successful via %s header", header.name))
+				}
+			}
+		}
+	}
+
 	return vulnerabilityFound
 }

@@ -69,6 +69,12 @@ func (c *Checker) createClient(proxyURL *url.URL, scheme string, result *ProxyRe
 		}
 	}
 
+	// Add warning about disabled TLS verification
+	if transport.TLSClientConfig != nil && transport.TLSClientConfig.InsecureSkipVerify {
+		result.SecurityWarnings = append(result.SecurityWarnings,
+			"TLS certificate verification disabled - proxy could perform MITM attacks")
+	}
+
 	client := &http.Client{
 		Transport: transport,
 		Timeout:   c.config.Timeout,

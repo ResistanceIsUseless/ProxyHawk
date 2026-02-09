@@ -4,7 +4,10 @@ A comprehensive proxy checker and validator with **advanced security testing** c
 
 ## 🚀 Major Updates
 - ✅ **Production-ready** with comprehensive security testing
-- ✅ **Enhanced security testing** - SSRF, Host header injection, protocol smuggling detection
+- ✅ **Three-Tier Check Modes** - Choose between basic, intense, or vulns scanning modes
+- ✅ **Enhanced Anonymity Detection** - Elite/Anonymous/Transparent/Compromised classification with 10+ header checks
+- ✅ **Proxy Chain Detection** - Automatic detection of proxy-behind-proxy configurations
+- ✅ **Enhanced security testing** - SSRF (60+ targets), Host header injection, protocol smuggling detection
 - ✅ **Structured logging** and error handling
 - ✅ **Modular architecture** with 27% code reduction
 - ✅ **Comprehensive input validation** with security hardening
@@ -70,14 +73,19 @@ make docker-run    # Run in container
 - **🛡️ Honeypot Detection**: Advanced filtering to identify and remove honeypots/monitoring systems
 
 ### Security Testing & Validation
-- **SSRF Detection**: Tests access to cloud metadata services (AWS, GCP, Azure), internal networks (RFC 1918, RFC 6598, RFC 3927), and localhost variants
+- **Three-Tier Check Modes**: Choose between basic (connectivity only), intense (core security checks), or vulns (full vulnerability scanning)
+- **Advanced Anonymity Detection**: Classification of proxies into Elite, Anonymous, Transparent, or Compromised levels based on 10+ header checks
+- **Proxy Chain Detection**: Automatic detection of proxy-behind-proxy configurations via Via header and X-Forwarded-For analysis
+- **SSRF Detection**: Tests access to cloud metadata services (AWS, GCP, Azure), internal networks (RFC 1918, RFC 6598, RFC 3927), and localhost variants (60+ test targets)
 - **Host Header Injection**: Advanced testing with multiple injection vectors including X-Forwarded-Host, X-Real-IP, malformed headers, and HTTP/1.0 bypasses
 - **Protocol Smuggling**: Detection of HTTP request smuggling vulnerabilities using Content-Length/Transfer-Encoding conflicts
 - **Internal Network Scanning**: Port scanning capabilities and DNS rebinding protection testing
 - **Input Validation**: Comprehensive URL validation with security hardening against malicious inputs
 
 ### Advanced Features
-- Proxy anonymity detection with IP comparison
+- **Enhanced Anonymity Detection**: Elite/Anonymous/Transparent/Compromised classification with IP leak detection
+- **Proxy Chain Detection**: Detection of proxy-behind-proxy configurations with detailed chain information
+- **Header Leak Analysis**: Detection of 10+ header types that may leak real IP (X-Forwarded-For, Via, X-Real-IP, etc.)
 - Cloud provider detection and classification
 - Custom HTTP headers and User-Agent support
 - Rate limiting with per-host or global controls
@@ -161,20 +169,26 @@ Note: The scheme (http://, https://, socks5://) is optional. If not provided, ht
 ### Command Line Options
 ```
 Core Options:
-- -l: File containing proxy list (one per line) (required)
+- -l: File containing proxy list (one per line) (required for checking mode, optional for discovery-only)
 - -config: Path to configuration file (default: config/default.yaml)
 - -c: Number of concurrent checks (overrides config)
 - -t: Timeout in seconds (overrides config)
 - -v: Enable verbose output
 - -d: Enable debug mode (shows detailed request/response information)
+- -hot-reload: Enable configuration hot-reloading (watches config file for changes)
 
 Security Testing:
+- -mode: Check mode: basic (connectivity only), intense (advanced security checks), vulns (vulnerability scanning) (default: basic)
+- -advanced: Enable all advanced security checks (overrides -mode setting)
+- -interactsh: Enable Interactsh for out-of-band detection (enhances security checks with external callback verification)
 - -r: Use reverse DNS lookup for host headers
 - Advanced security tests are configured via the YAML config file:
-  * SSRF testing against internal networks and cloud metadata
+  * SSRF testing against internal networks and cloud metadata (60+ targets)
   * Host header injection with multiple attack vectors
   * Protocol smuggling detection
   * DNS rebinding protection testing
+  * Enhanced anonymity detection with 10+ header checks
+  * Proxy chain detection via Via and X-Forwarded-For analysis
 
 Output Options:
 - -o: Output results to text file (includes all details and summary)
@@ -183,10 +197,21 @@ Output Options:
 - -wpa: Output only working anonymous proxies to a text file (format: proxy - speed)
 - -no-ui: Disable terminal UI (for automation/scripting)
 
+Progress Options (for -no-ui mode):
+- -progress: Progress indicator type (bar, spinner, dots, percent, basic, none) (default: bar)
+- -progress-width: Width of progress bar (default: 50)
+- -progress-no-color: Disable colored progress output
+
 Rate Limiting:
 - -rate-limit: Enable rate limiting to prevent overwhelming target servers
 - -rate-delay: Delay between requests (e.g. 500ms, 1s, 2s) (default: 1s)
 - -rate-per-host: Apply rate limiting per host instead of globally (default: true)
+- -rate-per-proxy: Apply rate limiting per individual proxy (takes precedence over per-host)
+
+Metrics:
+- -metrics: Enable Prometheus metrics endpoint
+- -metrics-addr: Address to serve metrics on (default: :9090)
+- -metrics-path: Path for metrics endpoint (default: /metrics)
 
 Protocol Support:
 - -http2: Enable HTTP/2 protocol detection and support
@@ -199,12 +224,17 @@ Discovery Options:
 - -discover-limit: Maximum number of candidates to discover (default: 100)
 - -discover-validate: Validate discovered candidates immediately
 - -discover-countries: Comma-separated list of country codes to target
-- -discover-min-confidence: Minimum confidence score for candidates
+- -discover-min-confidence: Minimum confidence score for candidates (0.0-1.0, default: 0.0)
 - -discover-no-honeypot-filter: Disable honeypot detection and filtering
+
+Help Options:
+- -help, -h: Show help message
+- -version: Show version information
+- -quickstart: Show quick start guide with examples
 ```
 ### Example Commands
 
-Basic check against default URL:
+Basic check against default URL (connectivity only):
 ```bash
 ./proxyhawk -l proxies.txt
 ```
@@ -212,6 +242,21 @@ Basic check against default URL:
 Check with increased concurrency and longer timeout:
 ```bash
 ./proxyhawk -l proxies.txt -c 20 -t 15s
+```
+
+Enable intense mode with core security checks:
+```bash
+./proxyhawk -l proxies.txt -mode intense
+```
+
+Enable full vulnerability scanning mode:
+```bash
+./proxyhawk -l proxies.txt -mode vulns -d
+```
+
+Enable all advanced checks (overrides mode):
+```bash
+./proxyhawk -l proxies.txt -advanced -d
 ```
 
 Enable comprehensive security testing with debug output:
@@ -267,6 +312,57 @@ Check proxies with rate limiting to avoid IP bans:
 Test proxies with HTTP/2 and HTTP/3 support:
 ```bash
 ./proxyhawk -l proxies.txt -http2 -http3 -v
+```
+
+Run with hot-reloading config (for long-running checks):
+```bash
+./proxyhawk -l proxies.txt -hot-reload -config custom_config.yaml
+```
+
+Use granular per-proxy rate limiting (slowest but safest):
+```bash
+./proxyhawk -l proxies.txt -rate-limit -rate-per-proxy -rate-delay 3s
+```
+
+Run in automation mode with custom progress indicator:
+```bash
+./proxyhawk -l proxies.txt -no-ui -progress spinner -o results.txt
+```
+
+Enable metrics for monitoring:
+```bash
+./proxyhawk -l proxies.txt -metrics -metrics-addr :9090
+```
+
+### Check Mode Examples
+
+Basic mode (connectivity only, fastest):
+```bash
+./proxyhawk -l proxies.txt -mode basic -c 50
+```
+
+Intense mode (core security checks, balanced):
+```bash
+./proxyhawk -l proxies.txt -mode intense -c 20 -t 15s
+```
+
+Vulnerability scanning mode (comprehensive, slowest):
+```bash
+./proxyhawk -l proxies.txt -mode vulns -c 10 -t 30s -d
+```
+
+Override mode with explicit advanced checks:
+```bash
+./proxyhawk -l proxies.txt -advanced -t 25s
+```
+
+Enable Interactsh for out-of-band vulnerability confirmation:
+```bash
+# With intense mode (recommended for anonymity testing)
+./proxyhawk -l proxies.txt -mode intense -interactsh
+
+# With vulns mode (recommended for full vulnerability testing)
+./proxyhawk -l proxies.txt -mode vulns -interactsh -d
 ```
 
 ### Discovery Mode Examples
@@ -326,6 +422,50 @@ Enable verbose logging to see honeypot filtering in action:
 ./proxyhawk -discover -discover-source all -discover-limit 100 -v
 ```
 
+### Check Modes
+
+ProxyHawk supports three check modes to balance speed and thoroughness:
+
+| Mode | Description | Tests Included | Performance | Use Case |
+|------|-------------|----------------|-------------|----------|
+| **basic** | Connectivity only | Connection validation, response validation | Fastest (~1-2s per proxy) | Quick proxy list validation, high-volume testing |
+| **intense** | Core security checks | Basic + SSRF, Host Header Injection, Protocol Smuggling, IPv6, Anonymity Detection, Chain Detection | Moderate (~5-10s per proxy) | Production proxy vetting, security-conscious deployments |
+| **vulns** | Full vulnerability scanning | Intense + DNS Rebinding, Cache Poisoning, Extended SSRF (60+ targets) | Slowest (~15-30s per proxy) | Security research, comprehensive auditing |
+
+**Test Coverage by Mode:**
+
+- **Basic Mode**:
+  - ✅ Connectivity validation
+  - ✅ Response validation
+  - ✅ Protocol detection
+  - ✅ Basic anonymity detection
+  - ❌ Advanced security checks disabled
+
+- **Intense Mode**:
+  - ✅ All basic mode checks
+  - ✅ SSRF testing (core targets)
+  - ✅ Host Header Injection detection
+  - ✅ Protocol Smuggling detection
+  - ✅ IPv6 testing
+  - ✅ Enhanced anonymity detection (10+ headers)
+  - ✅ Proxy chain detection
+  - ⚠️ DNS Rebinding disabled (slow)
+  - ⚠️ Cache Poisoning disabled (slow)
+
+- **Vulns Mode**:
+  - ✅ All intense mode checks
+  - ✅ DNS Rebinding testing
+  - ✅ Cache Poisoning testing
+  - ✅ Extended SSRF testing (60+ targets including cloud metadata)
+  - ✅ Comprehensive security audit
+
+**Anonymity Detection (All Modes):**
+All modes include basic anonymity detection. Intense and Vulns modes include enhanced detection with:
+- 10+ header leak checks (X-Forwarded-For, Via, X-Real-IP, etc.)
+- IP extraction from leaked headers
+- Proxy chain detection via Via and X-Forwarded-For analysis
+- Classification: Elite, Anonymous, Transparent, Compromised, Unknown
+
 ### Output Formats
 
 #### Text Output (-o)
@@ -365,6 +505,11 @@ The JSON output includes a structured format with:
       "real_ip": "1.2.3.4",
       "proxy_ip": "5.6.7.8",
       "is_anonymous": true,
+      "anonymity_level": "elite",
+      "detected_ip": "",
+      "leaking_headers": [],
+      "proxy_chain_detected": false,
+      "proxy_chain_info": "",
       "cloud_provider": "AWS",
       "internal_access": false,
       "metadata_access": false,
@@ -392,6 +537,13 @@ The JSON output includes a structured format with:
   ]
 }
 ```
+
+**New Fields in JSON Output:**
+- `anonymity_level`: Classification (elite/anonymous/transparent/compromised/unknown)
+- `detected_ip`: IP address detected during anonymity check (if any leak found)
+- `leaking_headers`: Array of headers that leaked information
+- `proxy_chain_detected`: Boolean indicating if proxy-behind-proxy was detected
+- `proxy_chain_info`: Details about detected proxy chain
 
 ## Building
 

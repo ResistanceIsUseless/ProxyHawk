@@ -88,10 +88,56 @@ func (c *Checker) Check(proxyURL string) *ProxyResult {
 
 	if c.debug {
 		result.DebugInfo += fmt.Sprintf("[PHASE 2/2 COMPLETE] Validation successful\n")
+	}
+
+	// PHASE 3: Advanced Security Checks (if enabled)
+	if c.hasAdvancedChecks() {
+		if c.debug {
+			result.DebugInfo += fmt.Sprintf("[PHASE 3/3] Running advanced security checks\n")
+		}
+		if err := c.performAdvancedChecks(client, result); err != nil {
+			if c.debug {
+				result.DebugInfo += fmt.Sprintf("[PHASE 3/3] Advanced checks encountered error: %v\n", err)
+			}
+			// Don't fail the entire check if advanced checks fail
+			// Just log the error and continue
+		}
+		if c.debug {
+			result.DebugInfo += fmt.Sprintf("[PHASE 3/3 COMPLETE] Advanced security checks finished\n")
+		}
+	}
+
+	// PHASE 4: Anonymity Detection and Proxy Chain Detection
+	if c.debug {
+		result.DebugInfo += fmt.Sprintf("[PHASE 4/4] Checking proxy anonymity and chain detection\n")
+	}
+	anonymous, anonLevel, detectedIP, leakingHeaders, chainDetected, chainInfo, anonErr := c.checkAnonymity(client)
+	if anonErr == nil {
+		result.IsAnonymous = anonymous
+		result.AnonymityLevel = anonLevel
+		result.DetectedIP = detectedIP
+		result.LeakingHeaders = leakingHeaders
+		result.ProxyChainDetected = chainDetected
+		result.ProxyChainInfo = chainInfo
+		if c.debug {
+			result.DebugInfo += fmt.Sprintf("[PHASE 4/4 COMPLETE] Anonymity: %t, Level: %s\n", anonymous, anonLevel)
+			if chainDetected {
+				result.DebugInfo += fmt.Sprintf("  - Proxy Chain: YES (%s)\n", chainInfo)
+			}
+			if len(leakingHeaders) > 0 {
+				result.DebugInfo += fmt.Sprintf("  - Leaking Headers: %v\n", leakingHeaders)
+			}
+		}
+	} else if c.debug {
+		result.DebugInfo += fmt.Sprintf("[PHASE 4/4] Anonymity check failed: %v\n", anonErr)
+	}
+
+	if c.debug {
 		result.DebugInfo += fmt.Sprintf("[SUMMARY] Proxy check results for %s:\n", proxyURL)
 		result.DebugInfo += fmt.Sprintf("  - Type: %s\n", result.Type)
 		result.DebugInfo += fmt.Sprintf("  - Working: %t\n", result.Working)
 		result.DebugInfo += fmt.Sprintf("  - Speed: %v\n", result.Speed)
+		result.DebugInfo += fmt.Sprintf("  - Anonymous: %t (%s)\n", result.IsAnonymous, result.AnonymityLevel)
 		result.DebugInfo += fmt.Sprintf("  - Check Steps: %d\n", len(result.CheckResults))
 	}
 
@@ -102,9 +148,12 @@ func (c *Checker) Check(proxyURL string) *ProxyResult {
 func (c *Checker) determineProxyType(proxyURL *url.URL, result *ProxyResult) (ProxyType, *http.Client, error) {
 	var lastError string
 
-	// Save the original validation URL at the beginning of the function
+	// Use local validation URLs instead of mutating shared config
+	validationURLHTTP := "http://api.ipify.org?format=json"
+	validationURLHTTPS := "https://api.ipify.org?format=json"
+
+	// Save the original validation URL to restore after testing
 	origValidationURL := c.config.ValidationURL
-	// Ensure we restore the original URL at the end of the function
 	defer func() {
 		c.config.ValidationURL = origValidationURL
 	}()
@@ -135,7 +184,7 @@ func (c *Checker) determineProxyType(proxyURL *url.URL, result *ProxyResult) (Pr
 			client, err := c.createClient(proxyURL, scheme, result)
 			if err == nil {
 				// Test with HTTP endpoint
-				c.config.ValidationURL = "http://api.ipify.org?format=json"
+				c.config.ValidationURL = validationURLHTTP
 				httpSuccess, httpTestErr, httpCheckResult := c.testClientWithDetails(client, proxyType, result)
 
 				// Add the check result to our collection
@@ -144,7 +193,7 @@ func (c *Checker) determineProxyType(proxyURL *url.URL, result *ProxyResult) (Pr
 				}
 
 				// Then test with HTTPS endpoint
-				c.config.ValidationURL = "https://api.ipify.org?format=json"
+				c.config.ValidationURL = validationURLHTTPS
 				httpsSuccess, httpsTestErr, httpsCheckResult := c.testClientWithDetails(client, proxyType, result)
 
 				// Add the check result to our collection
@@ -231,7 +280,7 @@ func (c *Checker) determineProxyType(proxyURL *url.URL, result *ProxyResult) (Pr
 		}
 
 		// Test with HTTP endpoint
-		c.config.ValidationURL = "http://api.ipify.org?format=json"
+		c.config.ValidationURL = validationURLHTTP
 		httpSuccess, httpTestErr, httpCheckResult := c.testClientWithDetails(client, candidate.proxyType, result)
 
 		// Add the check result to our collection
@@ -257,7 +306,7 @@ func (c *Checker) determineProxyType(proxyURL *url.URL, result *ProxyResult) (Pr
 		}
 
 		// Then test with HTTPS endpoint
-		c.config.ValidationURL = "https://api.ipify.org?format=json"
+		c.config.ValidationURL = validationURLHTTPS
 		httpsSuccess, httpsTestErr, httpsCheckResult := c.testClientWithDetails(client, candidate.proxyType, result)
 
 		// Add the check result to our collection
@@ -397,7 +446,7 @@ func (c *Checker) determineProxyType(proxyURL *url.URL, result *ProxyResult) (Pr
 		}
 
 		// Test with HTTP endpoint
-		c.config.ValidationURL = "http://api.ipify.org?format=json"
+		c.config.ValidationURL = validationURLHTTP
 		httpSuccess, httpTestErr, httpCheckResult := c.testClientWithDetails(client, candidate.proxyType, result)
 
 		// Add the check result to our collection
@@ -423,7 +472,7 @@ func (c *Checker) determineProxyType(proxyURL *url.URL, result *ProxyResult) (Pr
 		}
 
 		// Test with HTTPS endpoint
-		c.config.ValidationURL = "https://api.ipify.org?format=json"
+		c.config.ValidationURL = validationURLHTTPS
 		httpsSuccess, httpsTestErr, httpsCheckResult := c.testClientWithDetails(client, candidate.proxyType, result)
 
 		// Add the check result to our collection

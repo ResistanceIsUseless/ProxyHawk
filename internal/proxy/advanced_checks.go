@@ -19,10 +19,11 @@ type AdvancedChecks struct {
 	TestHostHeaderInjection   bool     `yaml:"test_host_header_injection"`
 	TestSSRF                  bool     `yaml:"test_ssrf"`
 	DisableInteractsh         bool     `yaml:"disable_interactsh"`            // Set to true to disable Interactsh and use basic checks
-	TestNginxVulnerabilities  bool     `yaml:"test_nginx_vulnerabilities"`    // Test for nginx-specific vulnerabilities
-	TestApacheVulnerabilities bool     `yaml:"test_apache_vulnerabilities"`   // Test for Apache mod_proxy vulnerabilities
-	TestKongVulnerabilities   bool     `yaml:"test_kong_vulnerabilities"`     // Test for Kong API Gateway vulnerabilities
-	TestGenericVulnerabilities bool    `yaml:"test_generic_vulnerabilities"` // Test for generic proxy misconfigurations
+	TestNginxVulnerabilities   bool     `yaml:"test_nginx_vulnerabilities"`     // Test for nginx-specific vulnerabilities
+	TestApacheVulnerabilities  bool     `yaml:"test_apache_vulnerabilities"`    // Test for Apache mod_proxy vulnerabilities
+	TestKongVulnerabilities    bool     `yaml:"test_kong_vulnerabilities"`      // Test for Kong API Gateway vulnerabilities
+	TestGenericVulnerabilities bool     `yaml:"test_generic_vulnerabilities"`   // Test for generic proxy misconfigurations
+	TestExtendedVulnerabilities bool    `yaml:"test_extended_vulnerabilities"` // Test for extended/medium-priority vulnerabilities
 }
 
 // AdvancedCheckResult represents the result of advanced security checks
@@ -273,6 +274,21 @@ func (c *Checker) performAdvancedChecks(client *http.Client, result *ProxyResult
 		}
 	}
 
+	// Extended Vulnerability Tests
+	if c.config.AdvancedChecks.TestExtendedVulnerabilities {
+		if c.debug {
+			result.DebugInfo += "[EXTENDED VULNS] Running extended vulnerability checks\n"
+		}
+		extendedResults := c.performExtendedVulnerabilityChecks(client, result)
+		result.ExtendedVulnerabilities = extendedResults
+
+		if c.debug {
+			result.DebugInfo += fmt.Sprintf("[EXTENDED VULNS] Complete - Found: nginx-version=%t, nginx-config=%t, websocket=%t, http2-smuggling=%t, proxy-auth-bypass=%t\n",
+				extendedResults.NginxVersionDetected, extendedResults.NginxConfigExposed, extendedResults.WebSocketAbuseVulnerable,
+				extendedResults.HTTP2SmugglingVulnerable, extendedResults.ProxyAuthBypass)
+		}
+	}
+
 	return nil
 }
 
@@ -288,7 +304,8 @@ func (c *Checker) hasAdvancedChecks() bool {
 		checks.TestNginxVulnerabilities ||
 		checks.TestApacheVulnerabilities ||
 		checks.TestKongVulnerabilities ||
-		checks.TestGenericVulnerabilities
+		checks.TestGenericVulnerabilities ||
+		checks.TestExtendedVulnerabilities
 }
 
 // Individual check implementations

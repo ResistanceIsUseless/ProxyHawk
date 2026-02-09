@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
 	"strings"
@@ -94,6 +95,8 @@ type allChecksCompleteMsg struct {
 func main() {
 	// Parse command line flags
 	proxyList := flag.String("l", "", "File containing list of proxies")
+	proxyHost := flag.String("host", "", "Single proxy host (IP, hostname, or IP:PORT) to test")
+	proxyCIDR := flag.String("cidr", "", "CIDR range to test (e.g., 192.168.1.0/24, or 192.168.1.0/24:8080 to specify port)")
 	configFile := flag.String("config", "config/default.yaml", "Path to config file")
 	verbose := flag.Bool("v", false, "Enable verbose output")
 	debug := flag.Bool("d", false, "Enable debug mode")
@@ -176,9 +179,28 @@ func main() {
 		os.Exit(0)
 	}
 
-	// Validate required flags - proxy list is required unless in discovery mode
-	if *proxyList == "" && !*discoverMode {
-		help.PrintUsageError(os.Stderr, fmt.Errorf("proxy list file is required (or use -discover mode)"), noColor)
+	// Validate required flags - proxy list, host, or CIDR is required unless in discovery mode
+	if *proxyList == "" && *proxyHost == "" && *proxyCIDR == "" && !*discoverMode {
+		help.PrintUsageError(os.Stderr, fmt.Errorf("one of -l (file), -host (single host), -cidr (CIDR range), or -discover mode is required"), noColor)
+		os.Exit(1)
+	}
+
+	// Ensure only one input method is used
+	inputCount := 0
+	if *proxyList != "" {
+		inputCount++
+	}
+	if *proxyHost != "" {
+		inputCount++
+	}
+	if *proxyCIDR != "" {
+		inputCount++
+	}
+	if *discoverMode {
+		inputCount++
+	}
+	if inputCount > 1 {
+		help.PrintUsageError(os.Stderr, fmt.Errorf("only one of -l, -host, -cidr, or -discover can be used at a time"), noColor)
 		os.Exit(1)
 	}
 
@@ -347,26 +369,46 @@ func main() {
 		return
 	}
 
-	// Load proxies
-	proxies, warnings, err := loader.LoadProxies(*proxyList)
-	if err != nil {
-		// Enhanced error logging with error categorization
-		category := errors.GetErrorCategory(err)
-		logger.Error("Failed to load proxies",
-			"error", err,
-			"file", *proxyList,
-			"category", category,
-			"retryable", errors.IsRetryable(err))
-		os.Exit(1)
+	// Load proxies based on input method
+	var proxies []string
+	var warnings []string
+
+	if *proxyList != "" {
+		// Load from file
+		var loadErr error
+		proxies, warnings, loadErr = loader.LoadProxies(*proxyList)
+		if loadErr != nil {
+			category := errors.GetErrorCategory(loadErr)
+			logger.Error("Failed to load proxies",
+				"error", loadErr,
+				"file", *proxyList,
+				"category", category,
+				"retryable", errors.IsRetryable(loadErr))
+			os.Exit(1)
+		}
+		logger.ProxiesLoaded(len(proxies), *proxyList)
+	} else if *proxyHost != "" {
+		// Single host
+		proxies = []string{*proxyHost}
+		logger.Info("Testing single proxy host", "host", *proxyHost)
+	} else if *proxyCIDR != "" {
+		// CIDR range
+		var cidrErr error
+		proxies, cidrErr = expandCIDR(*proxyCIDR)
+		if cidrErr != nil {
+			logger.Error("Failed to expand CIDR range",
+				"error", cidrErr,
+				"cidr", *proxyCIDR)
+			os.Exit(1)
+		}
+		logger.Info("Expanded CIDR range", "cidr", *proxyCIDR, "count", len(proxies))
 	}
 
 	// Check if we have any proxies to work with
 	if len(proxies) == 0 {
-		logger.Error("No valid proxies found to check", "file", *proxyList)
+		logger.Error("No valid proxies found to check")
 		os.Exit(1)
 	}
-
-	logger.ProxiesLoaded(len(proxies), *proxyList)
 
 	// Log any warnings
 	for _, warning := range warnings {
@@ -1380,10 +1422,52 @@ func saveCandidatesToJSON(result *discovery.DiscoveryResult, filename string) er
 
 	encoder := json.NewEncoder(file)
 	encoder.SetIndent("", "  ")
-	
+
 	if err := encoder.Encode(result); err != nil {
 		return fmt.Errorf("failed to encode JSON: %w", err)
 	}
 
 	return nil
+}
+
+// expandCIDR expands a CIDR notation into individual IP addresses
+// Supports optional port specification (e.g., "192.168.1.0/24:8080")
+func expandCIDR(cidr string) ([]string, error) {
+	// Check if port is specified
+	var port string
+	cidrParts := strings.Split(cidr, ":")
+	if len(cidrParts) == 2 {
+		cidr = cidrParts[0]
+		port = ":" + cidrParts[1]
+	} else if len(cidrParts) > 2 {
+		return nil, fmt.Errorf("invalid CIDR format: %s", cidr)
+	}
+
+	// Parse CIDR
+	ip, ipNet, err := net.ParseCIDR(cidr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid CIDR notation: %w", err)
+	}
+
+	var ips []string
+	for ip := ip.Mask(ipNet.Mask); ipNet.Contains(ip); inc(ip) {
+		ips = append(ips, ip.String()+port)
+	}
+
+	// Remove network and broadcast addresses for IPv4
+	if len(ips) > 2 {
+		ips = ips[1 : len(ips)-1]
+	}
+
+	return ips, nil
+}
+
+// inc increments an IP address
+func inc(ip net.IP) {
+	for j := len(ip) - 1; j >= 0; j-- {
+		ip[j]++
+		if ip[j] > 0 {
+			break
+		}
+	}
 }

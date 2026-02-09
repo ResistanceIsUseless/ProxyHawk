@@ -169,7 +169,9 @@ Note: The scheme (http://, https://, socks5://) is optional. If not provided, ht
 ### Command Line Options
 ```
 Core Options:
-- -l: File containing proxy list (one per line) (required for checking mode, optional for discovery-only)
+- -l: File containing proxy list (one per line)
+- -host: Single proxy host (IP, hostname, or IP:PORT) to test
+- -cidr: CIDR range to test (e.g., 192.168.1.0/24 or 192.168.1.0/24:8080)
 - -config: Path to configuration file (default: config/default.yaml)
 - -c: Number of concurrent checks (overrides config)
 - -t: Timeout in seconds (overrides config)
@@ -237,6 +239,18 @@ Help Options:
 Basic check against default URL (connectivity only):
 ```bash
 ./proxyhawk -l proxies.txt
+```
+
+Test a single proxy host:
+```bash
+./proxyhawk -host 192.168.1.100:8080
+./proxyhawk -host proxy.example.com:3128
+```
+
+Test a CIDR range:
+```bash
+./proxyhawk -cidr 192.168.1.0/24:8080
+./proxyhawk -cidr 10.0.0.0/24  # Tests common proxy ports on each IP
 ```
 
 Check with increased concurrency and longer timeout:

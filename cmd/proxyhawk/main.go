@@ -136,6 +136,7 @@ func main() {
 	checkMode := flag.String("mode", "basic", "Check mode: basic (connectivity only), intense (advanced security checks), vulns (vulnerability scanning)")
 	enableAdvancedChecks := flag.Bool("advanced", false, "Enable advanced security checks (overrides mode)")
 	enableInteractsh := flag.Bool("interactsh", false, "Enable Interactsh for out-of-band detection (enhances security checks)")
+	enableFingerprint := flag.Bool("fingerprint", false, "Enable proxy fingerprinting to identify proxy software/vendor")
 
 	// Discovery flags
 	discoverMode := flag.Bool("discover", false, "Enable discovery mode to find proxy candidates")
@@ -302,6 +303,11 @@ func main() {
 		cfg.EnableHTTP3 = true
 	}
 
+	// Override fingerprinting setting with CLI flag
+	if *enableFingerprint {
+		cfg.EnableFingerprint = true
+	}
+
 	// Apply check mode settings
 	if *enableAdvancedChecks {
 		// Explicit --advanced flag enables all checks
@@ -338,6 +344,7 @@ func main() {
 			cfg.AdvancedChecks.TestDNSRebinding = true
 			cfg.AdvancedChecks.TestCachePoisoning = true
 			cfg.AdvancedChecks.TestIPv6 = true
+			cfg.AdvancedChecks.TestNginxVulnerabilities = true
 		default:
 			logger.Warn("Invalid check mode specified, using basic", "mode", *checkMode)
 			cfg.AdvancedChecks.TestSSRF = false
@@ -489,6 +496,9 @@ func main() {
 		// HTTP/2 and HTTP/3 settings
 		EnableHTTP2: cfg.EnableHTTP2,
 		EnableHTTP3: cfg.EnableHTTP3,
+
+		// Fingerprinting settings
+		EnableFingerprint: cfg.EnableFingerprint,
 	}, *debug || cfg.AdvancedChecks.TestProtocolSmuggling || cfg.AdvancedChecks.TestDNSRebinding)
 
 	// Initialize UI

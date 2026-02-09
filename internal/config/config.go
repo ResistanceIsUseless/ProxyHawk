@@ -64,6 +64,9 @@ type Config struct {
 	EnableHTTP2 bool `yaml:"enable_http2"`
 	EnableHTTP3 bool `yaml:"enable_http3"`
 
+	// Fingerprinting settings
+	EnableFingerprint bool `yaml:"enable_fingerprint"`
+
 	// Discovery settings
 	Discovery DiscoveryConfig `yaml:"discovery"`
 }

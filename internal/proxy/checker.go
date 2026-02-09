@@ -132,6 +132,21 @@ func (c *Checker) Check(proxyURL string) *ProxyResult {
 		result.DebugInfo += fmt.Sprintf("[PHASE 4/4] Anonymity check failed: %v\n", anonErr)
 	}
 
+	// PHASE 5: Proxy Fingerprinting (if enabled)
+	if c.config.EnableFingerprint {
+		if c.debug {
+			result.DebugInfo += fmt.Sprintf("[PHASE 5/5] Fingerprinting proxy software\n")
+		}
+		fingerprint := c.FingerprintProxy(client, proxyURL)
+		result.Fingerprint = fingerprint
+		if c.debug {
+			result.DebugInfo += fmt.Sprintf("[PHASE 5/5 COMPLETE] Detected: %s (confidence: %.2f)\n", fingerprint.ProxySoftware, fingerprint.Confidence)
+			if fingerprint.Version != "" {
+				result.DebugInfo += fmt.Sprintf("  - Version: %s\n", fingerprint.Version)
+			}
+		}
+	}
+
 	if c.debug {
 		result.DebugInfo += fmt.Sprintf("[SUMMARY] Proxy check results for %s:\n", proxyURL)
 		result.DebugInfo += fmt.Sprintf("  - Type: %s\n", result.Type)
@@ -139,6 +154,9 @@ func (c *Checker) Check(proxyURL string) *ProxyResult {
 		result.DebugInfo += fmt.Sprintf("  - Speed: %v\n", result.Speed)
 		result.DebugInfo += fmt.Sprintf("  - Anonymous: %t (%s)\n", result.IsAnonymous, result.AnonymityLevel)
 		result.DebugInfo += fmt.Sprintf("  - Check Steps: %d\n", len(result.CheckResults))
+		if c.config.EnableFingerprint && result.Fingerprint != nil {
+			result.DebugInfo += fmt.Sprintf("  - Fingerprint: %s %s\n", result.Fingerprint.ProxySoftware, result.Fingerprint.Version)
+		}
 	}
 
 	return result

@@ -72,6 +72,9 @@ type Config struct {
 	// HTTP/2 and HTTP/3 settings
 	EnableHTTP2 bool // Whether to enable HTTP/2 protocol detection and support
 	EnableHTTP3 bool // Whether to enable HTTP/3 protocol detection and support
+
+	// Fingerprinting settings
+	EnableFingerprint bool // Whether to enable proxy software fingerprinting
 }
 
 // CheckResult represents the result of a single check
@@ -127,6 +130,12 @@ type ProxyResult struct {
 	SupportsHTTPS bool
 	SupportsHTTP2 bool
 	SupportsHTTP3 bool
+
+	// Fingerprinting information
+	Fingerprint *FingerprintResult `json:"fingerprint,omitempty"`
+
+	// Vulnerability scan results
+	NginxVulnerabilities *NginxVulnResult `json:"nginx_vulnerabilities,omitempty"`
 }
 
 // Checker represents the main proxy checker

@@ -19,6 +19,7 @@ type AdvancedChecks struct {
 	TestHostHeaderInjection bool     `yaml:"test_host_header_injection"`
 	TestSSRF                bool     `yaml:"test_ssrf"`
 	DisableInteractsh       bool     `yaml:"disable_interactsh"` // Set to true to disable Interactsh and use basic checks
+	TestNginxVulnerabilities bool    `yaml:"test_nginx_vulnerabilities"` // Test for nginx-specific vulnerabilities
 }
 
 // AdvancedCheckResult represents the result of advanced security checks
@@ -212,6 +213,20 @@ func (c *Checker) performAdvancedChecks(client *http.Client, result *ProxyResult
 		}
 	}
 
+	// Nginx Vulnerability Tests
+	if c.config.AdvancedChecks.TestNginxVulnerabilities {
+		if c.debug {
+			result.DebugInfo += "[NGINX VULNS] Running nginx-specific vulnerability checks\n"
+		}
+		nginxResults := c.performNginxVulnerabilityChecks(client, result)
+		result.NginxVulnerabilities = nginxResults
+
+		if c.debug {
+			result.DebugInfo += fmt.Sprintf("[NGINX VULNS] Complete - Found: off-by-slash=%t, k8s-api=%t, webhook=%t\n",
+				nginxResults.OffBySlashVuln, nginxResults.K8sAPIExposed, nginxResults.IngressWebhookExposed)
+		}
+	}
+
 	return nil
 }
 
@@ -223,7 +238,8 @@ func (c *Checker) hasAdvancedChecks() bool {
 		len(checks.TestHTTPMethods) > 0 ||
 		checks.TestCachePoisoning ||
 		checks.TestHostHeaderInjection ||
-		checks.TestSSRF
+		checks.TestSSRF ||
+		checks.TestNginxVulnerabilities
 }
 
 // Individual check implementations

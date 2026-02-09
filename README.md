@@ -4,14 +4,15 @@ A comprehensive proxy checker and validator with **advanced security testing** c
 
 ## 🚀 Major Updates
 - ✅ **Production-ready** with comprehensive security testing
+- ✅ **Proxy Fingerprinting** - Identify 12+ proxy types (nginx, apache, haproxy, kong, cloudflare, etc.)
+- ✅ **Vulnerability Scanning** - 20+ CVE checks for nginx, Apache, and Kong API Gateway
 - ✅ **Three-Tier Check Modes** - Choose between basic, intense, or vulns scanning modes
 - ✅ **Enhanced Anonymity Detection** - Elite/Anonymous/Transparent/Compromised classification with 10+ header checks
 - ✅ **Proxy Chain Detection** - Automatic detection of proxy-behind-proxy configurations
 - ✅ **Enhanced security testing** - SSRF (60+ targets), Host header injection, protocol smuggling detection
+- ✅ **Critical CVE Detection** - CVE-2025-1974 (CVSS 9.8), CVE-2021-40438 (CVSS 9.0), CVE-2020-11984 (CVSS 9.8)
 - ✅ **Structured logging** and error handling
-- ✅ **Modular architecture** with 27% code reduction
-- ✅ **Comprehensive input validation** with security hardening
-- ✅ **100% test coverage** for core functionality
+- ✅ **Modular architecture** with comprehensive test coverage
 
 ## Installation
 
@@ -73,7 +74,8 @@ make docker-run    # Run in container
 - **🛡️ Honeypot Detection**: Advanced filtering to identify and remove honeypots/monitoring systems
 
 ### Security Testing & Validation
-- **Three-Tier Check Modes**: Choose between basic (connectivity only), intense (core security checks), or vulns (full vulnerability scanning)
+- **Three-Tier Check Modes**: Choose between basic (connectivity only), intense (core security checks), or vulns (full vulnerability scanning with 20+ CVE checks)
+- **Proxy Fingerprinting**: Identify proxy software/vendor (nginx, apache, haproxy, varnish, traefik, envoy, caddy, cloudflare, fastly, AWS, kong, squid) using header analysis, error page patterns, and behavioral testing
 - **Advanced Anonymity Detection**: Classification of proxies into Elite, Anonymous, Transparent, or Compromised levels based on 10+ header checks
 - **Proxy Chain Detection**: Automatic detection of proxy-behind-proxy configurations via Via header and X-Forwarded-For analysis
 - **SSRF Detection**: Tests access to cloud metadata services (AWS, GCP, Azure), internal networks (RFC 1918, RFC 6598, RFC 3927), and localhost variants (60+ test targets)
@@ -81,6 +83,29 @@ make docker-run    # Run in container
 - **Protocol Smuggling**: Detection of HTTP request smuggling vulnerabilities using Content-Length/Transfer-Encoding conflicts
 - **Internal Network Scanning**: Port scanning capabilities and DNS rebinding protection testing
 - **Input Validation**: Comprehensive URL validation with security hardening against malicious inputs
+
+### Vulnerability Scanning (20+ CVE Checks)
+**Nginx Ingress/Proxy Vulnerabilities:**
+- **Off-by-Slash Path Traversal**: Tests for alias directive misconfiguration exposing sensitive files (.git/config, .env, /etc/passwd)
+- **Kubernetes API Exposure**: Detects K8s API access via X-Original-URL/X-Rewrite-URL header manipulation
+- **CVE-2025-1974** (Critical, CVSS 9.8): Nginx ingress admission controller RCE vulnerability
+- **Config Injection**: Tests for CVE-2025-24513/24514/1097/1098 annotation-based attacks
+- **Debug Endpoint Exposure**: Checks for pprof, metrics, and status pages
+
+**Apache mod_proxy Vulnerabilities:**
+- **CVE-2021-40438** (Critical, CVSS 9.0): mod_proxy SSRF via unix socket notation (docker.sock, snapd.socket)
+- **CVE-2020-11984** (Critical, CVSS 9.8): mod_proxy_uwsgi buffer overflow RCE
+- **CVE-2021-41773** (High, CVSS 7.5): Path traversal and RCE in Apache 2.4.49
+- **CVE-2024-38473** (High, CVSS 8.1): ACL bypass via path normalization
+- **Generic SSRF**: Tests AWS/GCP metadata, Redis, localhost access
+- **Path Traversal**: 8+ Apache-specific traversal patterns
+
+**Kong API Gateway Vulnerabilities:**
+- **Kong Manager Exposure**: Detects exposed Kong Manager and Konga dashboards
+- **Admin API Exposure**: Tests 9 endpoints (/routes, /services, /consumers, /plugins, etc.)
+- **Routes Enumeration**: Exposes all configured routes and their configurations
+- **Services Enumeration**: Lists all backend services
+- **Consumers Enumeration** (Critical): Indicates complete authentication bypass
 
 ### Advanced Features
 - **Enhanced Anonymity Detection**: Elite/Anonymous/Transparent/Compromised classification with IP leak detection
@@ -180,9 +205,10 @@ Core Options:
 - -hot-reload: Enable configuration hot-reloading (watches config file for changes)
 
 Security Testing:
-- -mode: Check mode: basic (connectivity only), intense (advanced security checks), vulns (vulnerability scanning) (default: basic)
+- -mode: Check mode: basic (connectivity only), intense (advanced security checks), vulns (vulnerability scanning with 20+ CVE checks) (default: basic)
 - -advanced: Enable all advanced security checks (overrides -mode setting)
 - -interactsh: Enable Interactsh for out-of-band detection (enhances security checks with external callback verification)
+- -fingerprint: Enable proxy fingerprinting to identify proxy software/vendor (nginx, apache, kong, etc.)
 - -r: Use reverse DNS lookup for host headers
 - Advanced security tests are configured via the YAML config file:
   * SSRF testing against internal networks and cloud metadata (60+ targets)
@@ -191,6 +217,9 @@ Security Testing:
   * DNS rebinding protection testing
   * Enhanced anonymity detection with 10+ header checks
   * Proxy chain detection via Via and X-Forwarded-For analysis
+  * Nginx vulnerability scanning (5 checks including CVE-2025-1974)
+  * Apache mod_proxy vulnerability scanning (6 checks including CVE-2021-40438, CVE-2020-11984)
+  * Kong API Gateway vulnerability scanning (5 checks for exposed admin APIs)
 
 Output Options:
 - -o: Output results to text file (includes all details and summary)
@@ -263,9 +292,19 @@ Enable intense mode with core security checks:
 ./proxyhawk -l proxies.txt -mode intense
 ```
 
-Enable full vulnerability scanning mode:
+Enable full vulnerability scanning mode (20+ CVE checks):
 ```bash
 ./proxyhawk -l proxies.txt -mode vulns -d
+```
+
+Enable proxy fingerprinting:
+```bash
+./proxyhawk -l proxies.txt -fingerprint -v
+```
+
+Comprehensive scan with fingerprinting and vulnerability checks:
+```bash
+./proxyhawk -l proxies.txt -mode vulns -fingerprint -interactsh -d
 ```
 
 Enable all advanced checks (overrides mode):

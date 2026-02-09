@@ -40,7 +40,7 @@ type AppState struct {
 	verbose     bool
 	debug       bool
 	logger      *logging.Logger
-	mutex       sync.Mutex   // Mutex to protect shared state
+	mutex       sync.RWMutex // RWMutex to protect shared state (allows concurrent reads)
 	updateChan  chan tea.Msg // Channel for sending updates to the UI
 
 	// Terminal dimensions
@@ -725,9 +725,9 @@ func (s *AppState) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (s *AppState) View() string {
-	// Lock while reading view state to prevent race conditions
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
+	// Use read lock for rendering to allow concurrent reads
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
 
 	if s.view.Mode == ui.ModeDebug {
 		return s.view.RenderDebug()
@@ -804,10 +804,9 @@ func (s *AppState) startChecking() {
 					LastUpdate: time.Now(),
 				}
 				s.view.ActiveChecks[proxy] = status
+				s.mutex.Unlock()
 
 				// Update queue size when starting a check
-				// Queue size tracked in metrics
-				// Queue size tracked in metrics
 				// Queue size tracked in metrics
 				// Send update
 				s.updateChan <- progressUpdateMsg{}
@@ -868,11 +867,10 @@ func (s *AppState) startChecking() {
 						status.IsActive = false
 						status.LastUpdate = time.Now()
 					}
+					s.mutex.Unlock()
 
 					// Update queue size when a job is marked as inactive
-				// Queue size tracked in metrics
-				// Queue size tracked in metrics
-				// Queue size tracked in metrics
+					// Queue size tracked in metrics
 					// Send update
 					s.updateChan <- progressUpdateMsg{}
 

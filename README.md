@@ -5,7 +5,7 @@ A comprehensive proxy checker and validator with **advanced security testing** c
 ## 🚀 Major Updates
 - ✅ **Production-ready** with comprehensive security testing
 - ✅ **Proxy Fingerprinting** - Identify 12+ proxy types (nginx, apache, haproxy, kong, cloudflare, etc.)
-- ✅ **Vulnerability Scanning** - 26+ vulnerability checks including 6 critical CVEs (CVSS 9.0+)
+- ✅ **Vulnerability Scanning** - 33+ vulnerability checks including 6 critical CVEs (CVSS 9.0+)
 - ✅ **Three-Tier Check Modes** - Choose between basic, intense, or vulns scanning modes
 - ✅ **Enhanced Anonymity Detection** - Elite/Anonymous/Transparent/Compromised classification with 10+ header checks
 - ✅ **Proxy Chain Detection** - Automatic detection of proxy-behind-proxy configurations
@@ -114,6 +114,18 @@ make docker-run    # Run in container
 - **Web Cache Poisoning**: Tests 7+ unkeyed headers (X-Forwarded-Host, X-Original-URL, X-Rewrite-URL) for cache poisoning vulnerabilities
 - **Linkerd SSRF**: Tests l5d-dtab header manipulation for internal service access (SSH, MySQL, Redis, metadata services)
 - **Spring Boot Actuator Exposure**: Detects 16+ exposed management endpoints (/env, /heapdump, /jolokia, /shutdown, /gateway/routes)
+
+**Extended Vulnerability Checks (Priority 3):**
+- **Nginx Version Fingerprinting**: Precise version detection via Server header, error pages, and behavior analysis
+- **Nginx Config Exposure**: Tests 12+ paths for exposed nginx.conf and configuration files
+- **HTTP/2 Request Smuggling**: 4 vectors (CL-TE downgrade, pseudo-header injection, CRLF via binary headers, connection coalescing)
+- **WebSocket Abuse**: 4 checks (origin bypass, Content-Length smuggling, malformed upgrade, CSWSH null origin)
+- **Proxy Authentication Bypass**: 5 methods (empty auth, malformed Basic, SQL injection, multiple headers, Proxy-Connection bypass)
+- **Apache Server-Status Exposure**: Tests 6+ paths for exposed server-status pages
+- **CGI Script Exposure**: Detects 12+ exposed CGI scripts and directories
+
+
+
 
 ### Advanced Features
 - **Enhanced Anonymity Detection**: Elite/Anonymous/Transparent/Compromised classification with IP leak detection
@@ -229,6 +241,7 @@ Security Testing:
   * Apache mod_proxy vulnerability scanning (6 checks including CVE-2021-40438, CVE-2020-11984)
   * Kong API Gateway vulnerability scanning (5 checks for exposed admin APIs)
   * Generic proxy misconfigurations (10 checks: open proxy, X-Forwarded-For bypass, CVE-2022-46169, cache poisoning, Linkerd SSRF, Spring Boot Actuator)
+  * Extended vulnerability checks (7 checks: nginx version/config, HTTP/2 smuggling, WebSocket abuse, proxy auth bypass, Apache status/CGI)
 
 Output Options:
 - -o: Output results to text file (includes all details and summary)
@@ -301,7 +314,7 @@ Enable intense mode with core security checks:
 ./proxyhawk -l proxies.txt -mode intense
 ```
 
-Enable full vulnerability scanning mode (26+ vulnerability checks including 6 critical CVEs):
+Enable full vulnerability scanning mode (33+ vulnerability checks including 6 critical CVEs):
 ```bash
 ./proxyhawk -l proxies.txt -mode vulns -d
 ```

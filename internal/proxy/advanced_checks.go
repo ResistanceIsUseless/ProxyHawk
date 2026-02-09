@@ -17,9 +17,11 @@ type AdvancedChecks struct {
 	TestHTTPMethods         []string `yaml:"test_http_methods"`
 	TestCachePoisoning      bool     `yaml:"test_cache_poisoning"`
 	TestHostHeaderInjection bool     `yaml:"test_host_header_injection"`
-	TestSSRF                bool     `yaml:"test_ssrf"`
-	DisableInteractsh       bool     `yaml:"disable_interactsh"` // Set to true to disable Interactsh and use basic checks
-	TestNginxVulnerabilities bool    `yaml:"test_nginx_vulnerabilities"` // Test for nginx-specific vulnerabilities
+	TestSSRF                 bool     `yaml:"test_ssrf"`
+	DisableInteractsh        bool     `yaml:"disable_interactsh"` // Set to true to disable Interactsh and use basic checks
+	TestNginxVulnerabilities bool     `yaml:"test_nginx_vulnerabilities"` // Test for nginx-specific vulnerabilities
+	TestApacheVulnerabilities bool    `yaml:"test_apache_vulnerabilities"` // Test for Apache mod_proxy vulnerabilities
+	TestKongVulnerabilities   bool    `yaml:"test_kong_vulnerabilities"` // Test for Kong API Gateway vulnerabilities
 }
 
 // AdvancedCheckResult represents the result of advanced security checks
@@ -227,6 +229,34 @@ func (c *Checker) performAdvancedChecks(client *http.Client, result *ProxyResult
 		}
 	}
 
+	// Apache Vulnerability Tests
+	if c.config.AdvancedChecks.TestApacheVulnerabilities {
+		if c.debug {
+			result.DebugInfo += "[APACHE VULNS] Running Apache mod_proxy vulnerability checks\n"
+		}
+		apacheResults := c.performApacheVulnerabilityChecks(client, result)
+		result.ApacheVulnerabilities = apacheResults
+
+		if c.debug {
+			result.DebugInfo += fmt.Sprintf("[APACHE VULNS] Complete - Found: CVE-2021-40438=%t, CVE-2020-11984=%t, CVE-2021-41773=%t\n",
+				apacheResults.CVE_2021_40438_SSRF, apacheResults.CVE_2020_11984_RCE, apacheResults.CVE_2021_41773_PathTraversal)
+		}
+	}
+
+	// Kong Vulnerability Tests
+	if c.config.AdvancedChecks.TestKongVulnerabilities {
+		if c.debug {
+			result.DebugInfo += "[KONG VULNS] Running Kong API Gateway vulnerability checks\n"
+		}
+		kongResults := c.performKongVulnerabilityChecks(client, result)
+		result.KongVulnerabilities = kongResults
+
+		if c.debug {
+			result.DebugInfo += fmt.Sprintf("[KONG VULNS] Complete - Found: manager=%t, admin-api=%t, unauth-access=%t\n",
+				kongResults.ManagerExposed, kongResults.AdminAPIExposed, kongResults.UnauthorizedAccess)
+		}
+	}
+
 	return nil
 }
 
@@ -239,7 +269,9 @@ func (c *Checker) hasAdvancedChecks() bool {
 		checks.TestCachePoisoning ||
 		checks.TestHostHeaderInjection ||
 		checks.TestSSRF ||
-		checks.TestNginxVulnerabilities
+		checks.TestNginxVulnerabilities ||
+		checks.TestApacheVulnerabilities ||
+		checks.TestKongVulnerabilities
 }
 
 // Individual check implementations

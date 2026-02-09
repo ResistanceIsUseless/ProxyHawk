@@ -135,7 +135,9 @@ type ProxyResult struct {
 	Fingerprint *FingerprintResult `json:"fingerprint,omitempty"`
 
 	// Vulnerability scan results
-	NginxVulnerabilities *NginxVulnResult `json:"nginx_vulnerabilities,omitempty"`
+	NginxVulnerabilities  *NginxVulnResult  `json:"nginx_vulnerabilities,omitempty"`
+	ApacheVulnerabilities *ApacheVulnResult `json:"apache_vulnerabilities,omitempty"`
+	KongVulnerabilities   *KongVulnResult   `json:"kong_vulnerabilities,omitempty"`
 }
 
 // Checker represents the main proxy checker

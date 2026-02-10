@@ -5,7 +5,7 @@ A comprehensive proxy checker and validator with **advanced security testing** c
 ## 🚀 Major Updates
 - ✅ **Production-ready** with comprehensive security testing
 - ✅ **Proxy Fingerprinting** - Identify 12+ proxy types (nginx, apache, haproxy, kong, cloudflare, etc.)
-- ✅ **Vulnerability Scanning** - 48+ vulnerability checks including 6 critical CVEs (CVSS 9.0+)
+- ✅ **Vulnerability Scanning** - 55 vulnerability checks including 6 critical CVEs (CVSS 9.0+)
 - ✅ **Three-Tier Check Modes** - Choose between basic, intense, or vulns scanning modes
 - ✅ **Enhanced Anonymity Detection** - Elite/Anonymous/Transparent/Compromised classification with 10+ header checks
 - ✅ **Proxy Chain Detection** - Automatic detection of proxy-behind-proxy configurations
@@ -118,11 +118,16 @@ make docker-run    # Run in container
 **Extended Vulnerability Checks (Priority 3):**
 - **Nginx Version Fingerprinting**: Precise version detection via Server header, error pages, and behavior analysis
 - **Nginx Config Exposure**: Tests 12+ paths for exposed nginx.conf and configuration files
+- **Nginx Proxy Cache Bypass**: Cache key manipulation via unkeyed headers and query string
+- **Nginx Subrequest Auth Bypass**: auth_request module bypass via X-Original-URI and X-Accel-Redirect
 - **HTTP/2 Request Smuggling**: 4 vectors (CL-TE downgrade, pseudo-header injection, CRLF via binary headers, connection coalescing)
 - **WebSocket Abuse**: 4 checks (origin bypass, Content-Length smuggling, malformed upgrade, CSWSH null origin)
 - **Proxy Authentication Bypass**: 5 methods (empty auth, malformed Basic, SQL injection, multiple headers, Proxy-Connection bypass)
 - **Apache Server-Status Exposure**: Tests 6+ paths for exposed server-status pages
 - **CGI Script Exposure**: Detects 12+ exposed CGI scripts and directories
+- **Apache CVE-2019-10092**: XSS in mod_proxy error page via FTP URI
+- **Apache mod_rewrite SSRF**: RewriteRule-based SSRF to internal services
+- **Apache htaccess Override**: .htaccess file exposure and directory access control bypass
 
 **Vendor-Specific Vulnerability Checks (Priority 4):**
 - **HAProxy**: Statistics page exposure (6 paths), CVE-2023-40225 (request smuggling), CVE-2021-40346 (integer overflow), version detection
@@ -131,6 +136,8 @@ make docker-run    # Run in container
 - **Envoy**: Admin interface exposure (5 endpoints), CVE-2022-21654 (SSRF in original_dst), version detection
 - **Caddy**: Admin API exposure (4 endpoints), configuration disclosure, version detection
 - **Varnish**: BAN method exposure (cache poisoning), CVE-2022-45060 (request smuggling), version detection
+- **F5 BIG-IP**: iControl REST API exposure (6 endpoints), TMUI login page, version detection via /mgmt/tm/sys/version
+- **Nginx Plus**: Plus API exposure (9 endpoints), Dashboard exposure, version detection, commercial features detection
 - **Cloud-Specific**: AWS ALB header injection, Cloudflare Worker bypass, Cloudflare cache poisoning
 
 
@@ -323,7 +330,7 @@ Enable intense mode with core security checks:
 ./proxyhawk -l proxies.txt -mode intense
 ```
 
-Enable full vulnerability scanning mode (48+ vulnerability checks including 6 critical CVEs):
+Enable full vulnerability scanning mode (55 vulnerability checks including 6 critical CVEs):
 ```bash
 ./proxyhawk -l proxies.txt -mode vulns -d
 ```

@@ -53,9 +53,23 @@ type VendorVulnResult struct {
 	VarnishVersion           string   `json:"varnish_version,omitempty"`
 
 	// Cloud-specific checks
-	AWSALBHeaderInjection    bool     `json:"aws_alb_header_injection"`
-	CloudflareWorkerBypass   bool     `json:"cloudflare_worker_bypass"`
-	CloudflareCachePoisoning bool     `json:"cloudflare_cache_poisoning"`
+	AWSALBHeaderInjection    bool `json:"aws_alb_header_injection"`
+	CloudflareWorkerBypass   bool `json:"cloudflare_worker_bypass"`
+	CloudflareCachePoisoning bool `json:"cloudflare_cache_poisoning"`
+
+	// F5 BIG-IP checks
+	F5iControlExposed    bool   `json:"f5_icontrol_exposed"`
+	F5iControlPath       string `json:"f5_icontrol_path,omitempty"`
+	F5TMUIExposed        bool   `json:"f5_tmui_exposed"`
+	F5VersionDetected    bool   `json:"f5_version_detected"`
+	F5Version            string `json:"f5_version,omitempty"`
+
+	// Nginx Plus checks
+	NginxPlusAPIExposed   bool   `json:"nginx_plus_api_exposed"`
+	NginxPlusAPIPath      string `json:"nginx_plus_api_path,omitempty"`
+	NginxPlusDashboard    bool   `json:"nginx_plus_dashboard"`
+	NginxPlusVersionDetected bool   `json:"nginx_plus_version_detected"`
+	NginxPlusVersion      string `json:"nginx_plus_version,omitempty"`
 }
 
 // testHAProxyStatsExposure tests for exposed HAProxy statistics page
@@ -966,6 +980,306 @@ func (c *Checker) testCloudflareCachePoisoning(client *http.Client, result *Prox
 	return false
 }
 
+// testF5iControlAPI tests for exposed F5 BIG-IP iControl REST API
+func (c *Checker) testF5iControlAPI(client *http.Client, result *ProxyResult) (bool, string) {
+	if c.debug {
+		result.DebugInfo += "[F5 iCONTROL] Testing for exposed F5 BIG-IP iControl REST API\n"
+	}
+
+	iControlPaths := []string{
+		"/mgmt/tm/sys/version",
+		"/mgmt/tm/ltm/pool",
+		"/mgmt/tm/ltm/virtual",
+		"/mgmt/tm/sys",
+		"/mgmt/shared/authn/login",
+		"/mgmt/shared/identified-devices/config/device-info",
+	}
+
+	for _, path := range iControlPaths {
+		req, err := http.NewRequest("GET", c.config.ValidationURL+path, nil)
+		if err != nil {
+			continue
+		}
+
+		req.Header.Set("User-Agent", c.config.UserAgent)
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := client.Do(req)
+		if err != nil {
+			continue
+		}
+
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		bodyStr := strings.ToLower(string(body))
+
+		// Check for F5 BIG-IP API indicators
+		if resp.StatusCode == 200 || resp.StatusCode == 401 {
+			if strings.Contains(bodyStr, "bigip") ||
+				strings.Contains(bodyStr, "f5networks") ||
+				strings.Contains(bodyStr, "icontrol") ||
+				strings.Contains(bodyStr, "restjavapolicy") ||
+				strings.Contains(bodyStr, "\"kind\":\"tm:") {
+				if c.debug {
+					result.DebugInfo += fmt.Sprintf("  [CRITICAL] F5 iControl REST API exposed at: %s\n", path)
+				}
+				return true, path
+			}
+		}
+	}
+
+	return false, ""
+}
+
+// testF5TMUI tests for exposed F5 BIG-IP Traffic Management User Interface
+func (c *Checker) testF5TMUI(client *http.Client, result *ProxyResult) bool {
+	if c.debug {
+		result.DebugInfo += "[F5 TMUI] Testing for exposed F5 BIG-IP TMUI\n"
+	}
+
+	tmuiPaths := []string{
+		"/tmui/login.jsp",
+		"/tmui/",
+		"/tmui/Control/jspmap/tmui/login/welcome.jsp",
+		"/tmui/tmui/login/welcome.jsp",
+	}
+
+	for _, path := range tmuiPaths {
+		req, err := http.NewRequest("GET", c.config.ValidationURL+path, nil)
+		if err != nil {
+			continue
+		}
+
+		req.Header.Set("User-Agent", c.config.UserAgent)
+
+		resp, err := client.Do(req)
+		if err != nil {
+			continue
+		}
+
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		if resp.StatusCode == 200 {
+			bodyStr := strings.ToLower(string(body))
+
+			// Check for F5 TMUI indicators
+			if strings.Contains(bodyStr, "big-ip") ||
+				strings.Contains(bodyStr, "f5 networks") ||
+				strings.Contains(bodyStr, "tmui") ||
+				strings.Contains(bodyStr, "configuration utility") {
+				if c.debug {
+					result.DebugInfo += fmt.Sprintf("  [HIGH] F5 BIG-IP TMUI login page exposed at: %s\n", path)
+				}
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// testF5VersionDetection detects F5 BIG-IP version
+func (c *Checker) testF5VersionDetection(client *http.Client, result *ProxyResult) (bool, string) {
+	if c.debug {
+		result.DebugInfo += "[F5 VERSION] Detecting F5 BIG-IP version\n"
+	}
+
+	// Try version endpoint
+	req, err := http.NewRequest("GET", c.config.ValidationURL+"/mgmt/tm/sys/version", nil)
+	if err != nil {
+		return false, ""
+	}
+
+	req.Header.Set("User-Agent", c.config.UserAgent)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return false, ""
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	bodyStr := string(body)
+
+	// Extract version from JSON response
+	versionRegex := regexp.MustCompile(`"product"\s*:\s*"BIG-IP"\s*,\s*"version"\s*:\s*"([^"]+)"`)
+	if matches := versionRegex.FindStringSubmatch(bodyStr); len(matches) > 1 {
+		if c.debug {
+			result.DebugInfo += fmt.Sprintf("  [INFO] F5 BIG-IP version: %s\n", matches[1])
+		}
+		return true, matches[1]
+	}
+
+	// Check Server header
+	serverHeader := resp.Header.Get("Server")
+	if strings.Contains(strings.ToLower(serverHeader), "bigip") ||
+		strings.Contains(strings.ToLower(serverHeader), "f5") {
+		if c.debug {
+			result.DebugInfo += "  [INFO] F5 BIG-IP detected via Server header\n"
+		}
+		return true, "unknown"
+	}
+
+	return false, ""
+}
+
+// testNginxPlusAPI tests for exposed Nginx Plus API
+func (c *Checker) testNginxPlusAPI(client *http.Client, result *ProxyResult) (bool, string) {
+	if c.debug {
+		result.DebugInfo += "[NGINX PLUS] Testing for exposed Nginx Plus API\n"
+	}
+
+	plusAPIPaths := []string{
+		"/api/",
+		"/api/6/",
+		"/api/7/",
+		"/api/8/",
+		"/api/9/",
+		"/api/6/nginx",
+		"/api/6/http/upstreams",
+		"/api/6/http/keyvals",
+		"/api/6/stream/upstreams",
+	}
+
+	for _, path := range plusAPIPaths {
+		req, err := http.NewRequest("GET", c.config.ValidationURL+path, nil)
+		if err != nil {
+			continue
+		}
+
+		req.Header.Set("User-Agent", c.config.UserAgent)
+
+		resp, err := client.Do(req)
+		if err != nil {
+			continue
+		}
+
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		if resp.StatusCode == 200 {
+			bodyStr := string(body)
+
+			// Check for Nginx Plus API JSON indicators
+			if strings.Contains(bodyStr, "\"nginx_version\"") ||
+				strings.Contains(bodyStr, "\"address\"") && strings.Contains(bodyStr, "\"build\"") ||
+				strings.Contains(bodyStr, "\"upstreams\"") ||
+				strings.Contains(bodyStr, "\"version\"") && strings.Contains(bodyStr, "plus") {
+				if c.debug {
+					result.DebugInfo += fmt.Sprintf("  [HIGH] Nginx Plus API exposed at: %s\n", path)
+				}
+				return true, path
+			}
+		}
+	}
+
+	return false, ""
+}
+
+// testNginxPlusDashboard tests for exposed Nginx Plus Dashboard
+func (c *Checker) testNginxPlusDashboard(client *http.Client, result *ProxyResult) bool {
+	if c.debug {
+		result.DebugInfo += "[NGINX PLUS] Testing for exposed Nginx Plus Dashboard\n"
+	}
+
+	dashboardPaths := []string{
+		"/dashboard.html",
+		"/plus/dashboard.html",
+		"/status.html",
+	}
+
+	for _, path := range dashboardPaths {
+		req, err := http.NewRequest("GET", c.config.ValidationURL+path, nil)
+		if err != nil {
+			continue
+		}
+
+		req.Header.Set("User-Agent", c.config.UserAgent)
+
+		resp, err := client.Do(req)
+		if err != nil {
+			continue
+		}
+
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		if resp.StatusCode == 200 {
+			bodyStr := strings.ToLower(string(body))
+
+			// Check for Nginx Plus dashboard indicators
+			if strings.Contains(bodyStr, "nginx plus") ||
+				strings.Contains(bodyStr, "nginx-plus") ||
+				strings.Contains(bodyStr, "dashboard") && strings.Contains(bodyStr, "upstreams") {
+				if c.debug {
+					result.DebugInfo += fmt.Sprintf("  [MEDIUM] Nginx Plus Dashboard exposed at: %s\n", path)
+				}
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// testNginxPlusVersionDetection detects Nginx Plus version
+func (c *Checker) testNginxPlusVersionDetection(client *http.Client, result *ProxyResult) (bool, string) {
+	if c.debug {
+		result.DebugInfo += "[NGINX PLUS] Detecting Nginx Plus version\n"
+	}
+
+	// Try API version endpoint
+	req, err := http.NewRequest("GET", c.config.ValidationURL+"/api/6/nginx", nil)
+	if err != nil {
+		return false, ""
+	}
+
+	req.Header.Set("User-Agent", c.config.UserAgent)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return false, ""
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	bodyStr := string(body)
+
+	// Extract version from JSON
+	versionRegex := regexp.MustCompile(`"version"\s*:\s*"([^"]+)"`)
+	if matches := versionRegex.FindStringSubmatch(bodyStr); len(matches) > 1 {
+		if c.debug {
+			result.DebugInfo += fmt.Sprintf("  [INFO] Nginx Plus version: %s\n", matches[1])
+		}
+		return true, matches[1]
+	}
+
+	// Check Server header for Plus indicator
+	serverHeader := resp.Header.Get("Server")
+	if strings.Contains(strings.ToLower(serverHeader), "nginx") {
+		// Nginx Plus usually shows as "nginx" in Server header, but presence of Plus API confirms it's Plus
+		apiReq, _ := http.NewRequest("GET", c.config.ValidationURL+"/api/", nil)
+		apiReq.Header.Set("User-Agent", c.config.UserAgent)
+
+		apiResp, err := client.Do(apiReq)
+		if err == nil {
+			defer apiResp.Body.Close()
+			if apiResp.StatusCode == 200 {
+				if c.debug {
+					result.DebugInfo += "  [INFO] Nginx Plus detected via API presence\n"
+				}
+				return true, "unknown"
+			}
+		}
+	}
+
+	return false, ""
+}
+
 // performVendorVulnerabilityChecks runs all vendor-specific vulnerability checks
 func (c *Checker) performVendorVulnerabilityChecks(client *http.Client, result *ProxyResult) *VendorVulnResult {
 	vendorResult := &VendorVulnResult{}
@@ -1005,6 +1319,16 @@ func (c *Checker) performVendorVulnerabilityChecks(client *http.Client, result *
 	vendorResult.AWSALBHeaderInjection = c.testAWSALBHeaderInjection(client, result)
 	vendorResult.CloudflareWorkerBypass = c.testCloudflareWorkerBypass(client, result)
 	vendorResult.CloudflareCachePoisoning = c.testCloudflareCachePoisoning(client, result)
+
+	// F5 BIG-IP checks
+	vendorResult.F5iControlExposed, vendorResult.F5iControlPath = c.testF5iControlAPI(client, result)
+	vendorResult.F5TMUIExposed = c.testF5TMUI(client, result)
+	vendorResult.F5VersionDetected, vendorResult.F5Version = c.testF5VersionDetection(client, result)
+
+	// Nginx Plus checks
+	vendorResult.NginxPlusAPIExposed, vendorResult.NginxPlusAPIPath = c.testNginxPlusAPI(client, result)
+	vendorResult.NginxPlusDashboard = c.testNginxPlusDashboard(client, result)
+	vendorResult.NginxPlusVersionDetected, vendorResult.NginxPlusVersion = c.testNginxPlusVersionDetection(client, result)
 
 	return vendorResult
 }

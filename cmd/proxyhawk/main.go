@@ -137,6 +137,8 @@ func main() {
 	enableAdvancedChecks := flag.Bool("advanced", false, "Enable advanced security checks (overrides mode)")
 	enableInteractsh := flag.Bool("interactsh", false, "Enable Interactsh for out-of-band detection (enhances security checks)")
 	enableFingerprint := flag.Bool("fingerprint", false, "Enable proxy fingerprinting to identify proxy software/vendor")
+	enablePathFingerprint := flag.Bool("path-fingerprint", false, "Enable path-based fingerprinting to test multiple endpoints and detect backend routing")
+	pathFingerprintPaths := flag.String("paths", "", "Comma-separated list of custom paths to test (default: /, /admin, /api, /v1, etc.)")
 
 	// Discovery flags
 	discoverMode := flag.Bool("discover", false, "Enable discovery mode to find proxy candidates")
@@ -408,6 +410,12 @@ func main() {
 	// Handle discovery mode
 	if *discoverMode {
 		runDiscoveryMode(cfg, logger, *discoverSource, *discoverQuery, *discoverLimit, *discoverValidate, *discoverNoHoneypotFilter, *outputFile, *jsonFile)
+		return
+	}
+
+	// Handle path-based fingerprinting mode
+	if *enablePathFingerprint {
+		runPathFingerprintMode(logger, *proxyHost, *pathFingerprintPaths, *timeout, cfg.InsecureSkipVerify, *outputFile, *jsonFile)
 		return
 	}
 
@@ -1434,6 +1442,257 @@ func runDiscoveryMode(cfg *config.Config, logger *logging.Logger, source, query 
 	}
 
 	fmt.Printf("\n🎉 Discovery completed successfully!\n")
+}
+
+// runPathFingerprintMode performs path-based fingerprinting on a target
+func runPathFingerprintMode(logger *logging.Logger, host, pathsStr string, timeout int, insecureSSL bool, outputFile, jsonFile string) {
+	if host == "" {
+		logger.Error("Path fingerprinting requires a host (-host flag)")
+		fmt.Fprintf(os.Stderr, "Error: -host flag is required for path-based fingerprinting\n")
+		fmt.Fprintf(os.Stderr, "Example: proxyhawk -path-fingerprint -host http://10.176.17.250\n")
+		os.Exit(1)
+	}
+
+	// Ensure host has a protocol
+	targetURL := host
+	if !strings.HasPrefix(host, "http://") && !strings.HasPrefix(host, "https://") {
+		targetURL = "http://" + host
+	}
+
+	// Parse custom paths if provided
+	var customPaths []string
+	if pathsStr != "" {
+		customPaths = strings.Split(pathsStr, ",")
+		for i, path := range customPaths {
+			customPaths[i] = strings.TrimSpace(path)
+		}
+	}
+
+	// Set timeout
+	timeoutDuration := 15 * time.Second
+	if timeout > 0 {
+		timeoutDuration = time.Duration(timeout) * time.Second
+	}
+
+	logger.Info("Starting path-based fingerprinting",
+		"target", targetURL,
+		"timeout", timeoutDuration,
+		"custom_paths", len(customPaths))
+
+	fmt.Printf("\n🔍 Path-Based Fingerprinting\n")
+	fmt.Printf("===========================\n")
+	fmt.Printf("Target: %s\n", targetURL)
+	fmt.Printf("Timeout: %v\n", timeoutDuration)
+	if len(customPaths) > 0 {
+		fmt.Printf("Custom Paths: %v\n", customPaths)
+	}
+	fmt.Printf("\n")
+
+	// Perform path fingerprinting
+	result, err := proxy.PathFingerprint(targetURL, timeoutDuration, insecureSSL, customPaths)
+	if err != nil {
+		logger.Error("Path fingerprinting failed", "error", err)
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	logger.Info("Path fingerprinting completed",
+		"paths_tested", len(result.PathResults),
+		"header_differences", len(result.HeaderDifferences),
+		"detected_backends", len(result.DetectedBackends),
+		"routing_patterns", len(result.RoutingPatterns))
+
+	// Display proxy software detection
+	fmt.Printf("📋 Proxy Software Detection:\n")
+	fmt.Printf("=============================\n")
+	if result.ProxySoftware != proxy.ProxySoftwareUnknown {
+		fmt.Printf("Detected: %s (confidence: %.2f)\n", result.ProxySoftware, result.Confidence)
+	} else {
+		fmt.Printf("Unable to determine proxy software with confidence\n")
+	}
+	fmt.Printf("\n")
+
+	// Display path results
+	fmt.Printf("🌐 Path Test Results:\n")
+	fmt.Printf("=====================\n")
+	for path, pathResp := range result.PathResults {
+		if pathResp.Error != "" {
+			fmt.Printf("%-20s ❌ Error: %s\n", path, pathResp.Error)
+		} else {
+			statusIcon := "✅"
+			if pathResp.StatusCode >= 400 {
+				statusIcon = "⚠️"
+			} else if pathResp.StatusCode >= 500 {
+				statusIcon = "❌"
+			}
+			fmt.Printf("%-20s %s %d (%v)\n", path, statusIcon, pathResp.StatusCode, pathResp.ResponseTime)
+			if pathResp.ServerHeader != "" {
+				fmt.Printf("                     Server: %s\n", pathResp.ServerHeader)
+			}
+		}
+	}
+	fmt.Printf("\n")
+
+	// Display header differences
+	if len(result.HeaderDifferences) > 0 {
+		fmt.Printf("🔄 Header Differences Detected:\n")
+		fmt.Printf("===============================\n")
+		for _, diff := range result.HeaderDifferences {
+			suspiciousMarker := ""
+			if diff.Suspicious {
+				suspiciousMarker = " ⚠️  [SUSPICIOUS - May indicate backend routing]"
+			}
+			fmt.Printf("Header: %s%s\n", diff.HeaderName, suspiciousMarker)
+			for i, value := range diff.Values {
+				if i < len(diff.Paths) {
+					fmt.Printf("  - '%s' (paths: %v)\n", value, diff.Paths)
+				}
+			}
+			fmt.Printf("\n")
+		}
+	}
+
+	// Display detected backends
+	if len(result.DetectedBackends) > 0 {
+		fmt.Printf("🎯 Detected Backend Services:\n")
+		fmt.Printf("=============================\n")
+		for _, backend := range result.DetectedBackends {
+			fmt.Printf("Path: %s\n", backend.Path)
+			fmt.Printf("  Backend: %s (confidence: %.2f)\n", backend.Backend, backend.Confidence)
+			fmt.Printf("  Indicators:\n")
+			for _, indicator := range backend.Indicators {
+				fmt.Printf("    - %s\n", indicator)
+			}
+			fmt.Printf("\n")
+		}
+	}
+
+	// Display routing patterns
+	if len(result.RoutingPatterns) > 0 {
+		fmt.Printf("🔀 Routing Patterns Detected:\n")
+		fmt.Printf("=============================\n")
+		for _, pattern := range result.RoutingPatterns {
+			fmt.Printf("Pattern: %s\n", pattern.Pattern)
+			fmt.Printf("  Description: %s\n", pattern.Description)
+			if len(pattern.Paths) > 0 {
+				fmt.Printf("  Affected Paths: %v\n", pattern.Paths)
+			}
+			if len(pattern.Evidence) > 0 {
+				fmt.Printf("  Evidence:\n")
+				for _, evidence := range pattern.Evidence {
+					fmt.Printf("    - %s\n", evidence)
+				}
+			}
+			fmt.Printf("\n")
+		}
+	}
+
+	// Save results to files if requested
+	if outputFile != "" {
+		err := savePathFingerprintToText(result, outputFile)
+		if err != nil {
+			logger.Error("Failed to save text output", "error", err, "file", outputFile)
+		} else {
+			logger.Info("Results saved to text file", "file", outputFile)
+			fmt.Printf("📝 Results saved to: %s\n", outputFile)
+		}
+	}
+
+	if jsonFile != "" {
+		err := savePathFingerprintToJSON(result, jsonFile)
+		if err != nil {
+			logger.Error("Failed to save JSON output", "error", err, "file", jsonFile)
+		} else {
+			logger.Info("Results saved to JSON file", "file", jsonFile)
+			fmt.Printf("💾 Full results saved to: %s\n", jsonFile)
+		}
+	}
+
+	fmt.Printf("\n🎉 Path fingerprinting completed successfully!\n")
+}
+
+// savePathFingerprintToText saves path fingerprint results to a text file
+func savePathFingerprintToText(result *proxy.PathFingerprintResult, filename string) error {
+	file, err := os.Create(filename)
+	if err != nil {
+		return fmt.Errorf("failed to create file: %w", err)
+	}
+	defer file.Close()
+
+	fmt.Fprintf(file, "# ProxyHawk Path-Based Fingerprint Results\n")
+	fmt.Fprintf(file, "# Generated: %s\n", result.Timestamp.Format(time.RFC3339))
+	fmt.Fprintf(file, "# Target: %s\n\n", result.TargetURL)
+
+	fmt.Fprintf(file, "## Proxy Software Detection\n")
+	if result.ProxySoftware != proxy.ProxySoftwareUnknown {
+		fmt.Fprintf(file, "Detected: %s (confidence: %.2f)\n\n", result.ProxySoftware, result.Confidence)
+	} else {
+		fmt.Fprintf(file, "Unable to determine proxy software\n\n")
+	}
+
+	fmt.Fprintf(file, "## Path Test Results\n")
+	for path, pathResp := range result.PathResults {
+		if pathResp.Error != "" {
+			fmt.Fprintf(file, "%s: Error - %s\n", path, pathResp.Error)
+		} else {
+			fmt.Fprintf(file, "%s: HTTP %d (%v)\n", path, pathResp.StatusCode, pathResp.ResponseTime)
+			if pathResp.ServerHeader != "" {
+				fmt.Fprintf(file, "  Server: %s\n", pathResp.ServerHeader)
+			}
+		}
+	}
+	fmt.Fprintf(file, "\n")
+
+	if len(result.HeaderDifferences) > 0 {
+		fmt.Fprintf(file, "## Header Differences\n")
+		for _, diff := range result.HeaderDifferences {
+			suspicious := ""
+			if diff.Suspicious {
+				suspicious = " [SUSPICIOUS]"
+			}
+			fmt.Fprintf(file, "%s%s:\n", diff.HeaderName, suspicious)
+			for _, value := range diff.Values {
+				fmt.Fprintf(file, "  - %s\n", value)
+			}
+		}
+		fmt.Fprintf(file, "\n")
+	}
+
+	if len(result.DetectedBackends) > 0 {
+		fmt.Fprintf(file, "## Detected Backends\n")
+		for _, backend := range result.DetectedBackends {
+			fmt.Fprintf(file, "%s: %s (%.2f confidence)\n", backend.Path, backend.Backend, backend.Confidence)
+		}
+		fmt.Fprintf(file, "\n")
+	}
+
+	if len(result.RoutingPatterns) > 0 {
+		fmt.Fprintf(file, "## Routing Patterns\n")
+		for _, pattern := range result.RoutingPatterns {
+			fmt.Fprintf(file, "%s: %s\n", pattern.Pattern, pattern.Description)
+		}
+		fmt.Fprintf(file, "\n")
+	}
+
+	return nil
+}
+
+// savePathFingerprintToJSON saves path fingerprint results to a JSON file
+func savePathFingerprintToJSON(result *proxy.PathFingerprintResult, filename string) error {
+	file, err := os.Create(filename)
+	if err != nil {
+		return fmt.Errorf("failed to create file: %w", err)
+	}
+	defer file.Close()
+
+	encoder := json.NewEncoder(file)
+	encoder.SetIndent("", "  ")
+
+	if err := encoder.Encode(result); err != nil {
+		return fmt.Errorf("failed to encode JSON: %w", err)
+	}
+
+	return nil
 }
 
 // saveCandidatesToText saves discovery candidates to a text file

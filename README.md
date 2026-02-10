@@ -5,7 +5,7 @@ A comprehensive proxy checker and validator with **advanced security testing** c
 ## 🚀 Major Updates
 - ✅ **Production-ready** with comprehensive security testing
 - ✅ **Proxy Fingerprinting** - Identify 12+ proxy types (nginx, apache, haproxy, kong, cloudflare, etc.)
-- ✅ **Vulnerability Scanning** - 33+ vulnerability checks including 6 critical CVEs (CVSS 9.0+)
+- ✅ **Vulnerability Scanning** - 48+ vulnerability checks including 6 critical CVEs (CVSS 9.0+)
 - ✅ **Three-Tier Check Modes** - Choose between basic, intense, or vulns scanning modes
 - ✅ **Enhanced Anonymity Detection** - Elite/Anonymous/Transparent/Compromised classification with 10+ header checks
 - ✅ **Proxy Chain Detection** - Automatic detection of proxy-behind-proxy configurations
@@ -123,6 +123,15 @@ make docker-run    # Run in container
 - **Proxy Authentication Bypass**: 5 methods (empty auth, malformed Basic, SQL injection, multiple headers, Proxy-Connection bypass)
 - **Apache Server-Status Exposure**: Tests 6+ paths for exposed server-status pages
 - **CGI Script Exposure**: Detects 12+ exposed CGI scripts and directories
+
+**Vendor-Specific Vulnerability Checks (Priority 4):**
+- **HAProxy**: Statistics page exposure (6 paths), CVE-2023-40225 (request smuggling), CVE-2021-40346 (integer overflow), version detection
+- **Squid**: Cache manager exposure (10 endpoints), CVE-2021-46784 (buffer overflow), CVE-2020-15810 (request smuggling), version detection
+- **Traefik**: Dashboard exposure (4 paths), API endpoint exposure (8 endpoints), CVE-2024-45410 (SSRF via middleware), version detection
+- **Envoy**: Admin interface exposure (5 endpoints), CVE-2022-21654 (SSRF in original_dst), version detection
+- **Caddy**: Admin API exposure (4 endpoints), configuration disclosure, version detection
+- **Varnish**: BAN method exposure (cache poisoning), CVE-2022-45060 (request smuggling), version detection
+- **Cloud-Specific**: AWS ALB header injection, Cloudflare Worker bypass, Cloudflare cache poisoning
 
 
 
@@ -314,7 +323,7 @@ Enable intense mode with core security checks:
 ./proxyhawk -l proxies.txt -mode intense
 ```
 
-Enable full vulnerability scanning mode (33+ vulnerability checks including 6 critical CVEs):
+Enable full vulnerability scanning mode (48+ vulnerability checks including 6 critical CVEs):
 ```bash
 ./proxyhawk -l proxies.txt -mode vulns -d
 ```

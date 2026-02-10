@@ -19,11 +19,12 @@ type AdvancedChecks struct {
 	TestHostHeaderInjection   bool     `yaml:"test_host_header_injection"`
 	TestSSRF                  bool     `yaml:"test_ssrf"`
 	DisableInteractsh         bool     `yaml:"disable_interactsh"`            // Set to true to disable Interactsh and use basic checks
-	TestNginxVulnerabilities   bool     `yaml:"test_nginx_vulnerabilities"`     // Test for nginx-specific vulnerabilities
-	TestApacheVulnerabilities  bool     `yaml:"test_apache_vulnerabilities"`    // Test for Apache mod_proxy vulnerabilities
-	TestKongVulnerabilities    bool     `yaml:"test_kong_vulnerabilities"`      // Test for Kong API Gateway vulnerabilities
-	TestGenericVulnerabilities bool     `yaml:"test_generic_vulnerabilities"`   // Test for generic proxy misconfigurations
-	TestExtendedVulnerabilities bool    `yaml:"test_extended_vulnerabilities"` // Test for extended/medium-priority vulnerabilities
+	TestNginxVulnerabilities    bool `yaml:"test_nginx_vulnerabilities"`     // Test for nginx-specific vulnerabilities
+	TestApacheVulnerabilities   bool `yaml:"test_apache_vulnerabilities"`    // Test for Apache mod_proxy vulnerabilities
+	TestKongVulnerabilities     bool `yaml:"test_kong_vulnerabilities"`      // Test for Kong API Gateway vulnerabilities
+	TestGenericVulnerabilities  bool `yaml:"test_generic_vulnerabilities"`   // Test for generic proxy misconfigurations
+	TestExtendedVulnerabilities bool `yaml:"test_extended_vulnerabilities"`  // Test for extended/medium-priority vulnerabilities
+	TestVendorVulnerabilities   bool `yaml:"test_vendor_vulnerabilities"`    // Test for vendor-specific vulnerabilities (HAProxy, Squid, Traefik, etc.)
 }
 
 // AdvancedCheckResult represents the result of advanced security checks
@@ -289,6 +290,25 @@ func (c *Checker) performAdvancedChecks(client *http.Client, result *ProxyResult
 		}
 	}
 
+	// Vendor-Specific Vulnerability Tests
+	if c.config.AdvancedChecks.TestVendorVulnerabilities {
+		if c.debug {
+			result.DebugInfo += "[VENDOR VULNS] Running vendor-specific vulnerability checks\n"
+		}
+		vendorResults := c.performVendorVulnerabilityChecks(client, result)
+		result.VendorVulnerabilities = vendorResults
+
+		if c.debug {
+			result.DebugInfo += fmt.Sprintf("[VENDOR VULNS] Complete - Found: HAProxy=%t, Squid=%t, Traefik=%t, Envoy=%t, Caddy=%t, Varnish=%t\n",
+				vendorResults.HAProxyStatsExposed || vendorResults.HAProxyCVE_2023_40225,
+				vendorResults.SquidCacheManagerExposed || vendorResults.SquidCVE_2021_46784,
+				vendorResults.TraefikDashboardExposed || vendorResults.TraefikAPIExposed,
+				vendorResults.EnvoyAdminExposed || vendorResults.EnvoyCVE_2022_21654,
+				vendorResults.CaddyAdminAPIExposed,
+				vendorResults.VarnishBanLurkExposed || vendorResults.VarnishCVE_2022_45060)
+		}
+	}
+
 	return nil
 }
 
@@ -305,7 +325,8 @@ func (c *Checker) hasAdvancedChecks() bool {
 		checks.TestApacheVulnerabilities ||
 		checks.TestKongVulnerabilities ||
 		checks.TestGenericVulnerabilities ||
-		checks.TestExtendedVulnerabilities
+		checks.TestExtendedVulnerabilities ||
+		checks.TestVendorVulnerabilities
 }
 
 // Individual check implementations

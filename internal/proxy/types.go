@@ -140,6 +140,7 @@ type ProxyResult struct {
 	KongVulnerabilities     *KongVulnResult     `json:"kong_vulnerabilities,omitempty"`
 	GenericVulnerabilities  *GenericVulnResult  `json:"generic_vulnerabilities,omitempty"`
 	ExtendedVulnerabilities *ExtendedVulnResult `json:"extended_vulnerabilities,omitempty"`
+	VendorVulnerabilities   *VendorVulnResult   `json:"vendor_vulnerabilities,omitempty"`
 }
 
 // Checker represents the main proxy checker

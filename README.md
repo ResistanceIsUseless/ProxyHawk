@@ -4,6 +4,7 @@ A comprehensive proxy checker and validator with **advanced security testing** c
 
 ## 🚀 Major Updates
 - ✅ **Production-ready** with comprehensive security testing
+- 🆕 **Path-Based Fingerprinting** - New mode for testing reverse proxies, API gateways, and Kubernetes Ingress
 - ✅ **Proxy Fingerprinting** - Identify 12+ proxy types (nginx, apache, haproxy, kong, cloudflare, etc.)
 - ✅ **Vulnerability Scanning** - 55 vulnerability checks including 6 critical CVEs (CVSS 9.0+)
 - ✅ **Three-Tier Check Modes** - Choose between basic, intense, or vulns scanning modes
@@ -76,6 +77,13 @@ make docker-run    # Run in container
 ### Security Testing & Validation
 - **Three-Tier Check Modes**: Choose between basic (connectivity only), intense (core security checks), or vulns (full vulnerability scanning with 20+ CVE checks)
 - **Proxy Fingerprinting**: Identify proxy software/vendor (nginx, apache, haproxy, varnish, traefik, envoy, caddy, cloudflare, fastly, AWS, kong, squid) using header analysis, error page patterns, and behavioral testing
+- **Path-Based Fingerprinting**: New direct scanning mode for reverse proxies and API gateways
+  - Tests multiple endpoints (/, /admin, /api, /v1, /health, /status, /metrics, etc.)
+  - Detects backend routing patterns and rewrite configurations
+  - Identifies proxy software from error pages when Server header is hidden
+  - Compares headers across paths to detect multi-backend routing
+  - Detects backend frameworks (Django, Flask, Spring, Rails, etc.)
+  - Works with Kubernetes Ingress, API Gateways, and reverse proxies
 - **Advanced Anonymity Detection**: Classification of proxies into Elite, Anonymous, Transparent, or Compromised levels based on 10+ header checks
 - **Proxy Chain Detection**: Automatic detection of proxy-behind-proxy configurations via Via header and X-Forwarded-For analysis
 - **SSRF Detection**: Tests access to cloud metadata services (AWS, GCP, Azure), internal networks (RFC 1918, RFC 6598, RFC 3927), and localhost variants (60+ test targets)
@@ -245,6 +253,8 @@ Security Testing:
 - -advanced: Enable all advanced security checks (overrides -mode setting)
 - -interactsh: Enable Interactsh for out-of-band detection (enhances security checks with external callback verification)
 - -fingerprint: Enable proxy fingerprinting to identify proxy software/vendor (nginx, apache, kong, etc.)
+- -path-fingerprint: Enable path-based fingerprinting mode for reverse proxies and API gateways
+- -paths: Comma-separated list of custom paths to test (use with -path-fingerprint)
 - -r: Use reverse DNS lookup for host headers
 - Advanced security tests are configured via the YAML config file:
   * SSRF testing against internal networks and cloud metadata (60+ targets)
@@ -502,6 +512,43 @@ Discover proxies by specific source with validation:
 ```bash
 ./proxyhawk -discover -discover-source censys -discover-query "services.service_name: http and services.port: 3128" -discover-validate -o censys-proxies.txt
 ```
+
+### Path-Based Fingerprinting Examples
+
+Test reverse proxy or API gateway (default paths):
+```bash
+./proxyhawk -path-fingerprint -host http://api.example.com
+./proxyhawk -path-fingerprint -host https://gateway.k8s.local
+```
+
+Test Kubernetes Ingress or Nginx gateway:
+```bash
+./proxyhawk -path-fingerprint -host http://10.176.17.250
+```
+
+Test with custom paths:
+```bash
+./proxyhawk -path-fingerprint -host http://api.example.com -paths "/,/api,/admin,/health,/status"
+```
+
+Test and save results to files:
+```bash
+./proxyhawk -path-fingerprint -host http://gateway.local -o path-results.txt -j path-results.json
+```
+
+Test with increased timeout:
+```bash
+./proxyhawk -path-fingerprint -host http://api.example.com -t 30
+```
+
+**Path-based fingerprinting mode features:**
+- Tests 20 default paths: /, /admin, /api, /v1, /v2, /api/v1, /api/v2, /health, /status, /metrics, /internal, /debug, /console, /dashboard, /management, /actuator, /swagger, /graphql, /ws, /websocket
+- Detects proxy software even when Server header is hidden (common security hardening)
+- Identifies backend routing patterns and rewrite configurations
+- Compares headers across paths to detect multi-backend setups
+- Detects backend frameworks (Django, Flask, Spring, Rails, ASP.NET, etc.)
+- Identifies suspicious header differences indicating backend routing
+- Works with reverse proxies, API gateways, and Kubernetes Ingress controllers
 
 Disable honeypot filtering (not recommended):
 ```bash

@@ -1,6 +1,21 @@
 # ProxyHawk TODO List
 
-Last updated: 2026-02-09
+Last updated: 2026-02-10
+
+## ✅ Completed Tasks (v1.4.0)
+
+### Path-Based Fingerprinting Implementation
+- [x] Implement path-based fingerprinting for reverse proxies and API gateways
+- [x] Add direct HTTP request capability (not through proxy)
+- [x] Test multiple paths (/, /admin, /api, /v1, etc.) - 20 default paths
+- [x] Compare server headers across different paths
+- [x] Detect backend routing/rewriting from header differences
+- [x] Identify proxy software from error page content (when Server header is hidden)
+- [x] Detect backend frameworks (Django, Flask, Spring, Rails, etc.)
+- [x] Identify routing patterns (API versioning, admin interfaces, health endpoints)
+- [x] Add -path-fingerprint and -paths command-line flags
+- [x] Test against Nginx Kubernetes Gateway (10.176.17.250)
+- [x] Update README.md with path-based fingerprinting documentation
 
 ## ✅ Completed Tasks (v1.3.0)
 

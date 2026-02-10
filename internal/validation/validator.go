@@ -45,7 +45,7 @@ type ProxyValidator struct {
 // NewProxyValidator creates a new proxy validator with default settings
 func NewProxyValidator() *ProxyValidator {
 	return &ProxyValidator{
-		allowPrivateIPs:   false,
+		allowPrivateIPs:   true, // Allow private IPs for internal infrastructure scanning
 		supportedSchemes:  []string{"http", "https", "socks4", "socks5"},
 		maxHostnameLength: 253,
 		maxPortNumber:     65535,

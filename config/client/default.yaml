@@ -1,0 +1,254 @@
+# ProxyHawk Client Configuration
+# Default configuration for proxy checking and vulnerability scanning
+#
+# This file is used by the proxyhawk CLI tool for checking proxies.
+# Copy to ~/.config/proxyhawk/config.yaml for user-specific settings.
+
+# ============================================================================
+# GENERAL SETTINGS
+# ============================================================================
+timeout: 15                   # Timeout in seconds for proxy checks
+insecure_skip_verify: true   # Skip TLS certificate verification (WARNING: insecure, for testing only)
+enable_cloud_checks: false   # Enable cloud provider detection (AWS, GCP, Azure, etc.)
+enable_anonymity_check: true # Enable proxy anonymity level detection
+concurrency: 10              # Number of concurrent proxy checks
+
+# ============================================================================
+# RATE LIMITING (Important for avoiding IP bans)
+# ============================================================================
+rate_limit_enabled: false    # Enable rate limiting between requests
+rate_limit_delay: 1s         # Delay between requests (e.g. 500ms, 1s, 2s)
+rate_limit_per_host: true    # Apply rate limiting per host instead of globally
+rate_limit_per_proxy: false  # Apply rate limiting per individual proxy
+
+# ============================================================================
+# RETRY MECHANISM (For handling transient failures)
+# ============================================================================
+retry_enabled: false          # Enable automatic retries for failed checks
+max_retries: 3               # Maximum number of retry attempts
+initial_retry_delay: 1s      # Initial delay before first retry
+max_retry_delay: 30s         # Maximum delay between retries
+backoff_factor: 2.0          # Exponential backoff multiplier
+retryable_errors:            # Error patterns that trigger retries
+  - "connection refused"
+  - "connection timed out"
+  - "connection reset"
+  - "network unreachable"
+  - "host unreachable"
+  - "operation timed out"
+  - "context deadline exceeded"
+  - "i/o timeout"
+
+# ============================================================================
+# PROXY AUTHENTICATION (If proxies require auth)
+# ============================================================================
+auth_enabled: false          # Enable proxy authentication
+default_username: ""         # Default username (if not in proxy URL)
+default_password: ""         # Default password (if not in proxy URL)
+auth_methods: ["basic"]      # Supported methods: basic, digest
+
+# ============================================================================
+# HTTP HEADERS AND USER AGENT
+# ============================================================================
+user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+default_headers:
+  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
+  Accept-Language: "en-US,en;q=0.9"
+  Accept-Encoding: "gzip, deflate, br"
+  Connection: "keep-alive"
+  Cache-Control: "no-cache"
+  Pragma: "no-cache"
+  DNT: "1"
+
+# ============================================================================
+# TEST URLs (URLs used to validate proxy functionality)
+# ============================================================================
+test_urls:
+  default_url: "https://api.ipify.org?format=json"
+  test_urls:
+    - url: "https://api.ipify.org?format=json"
+      expect_text: ""
+    - url: "https://httpbin.org/ip"
+      expect_text: ""
+
+# ============================================================================
+# RESPONSE VALIDATION
+# ============================================================================
+validation:
+  min_response_bytes: 50     # Minimum response size to consider valid
+  disallowed_keywords:       # Keywords indicating proxy failure
+    - "Access Denied"
+    - "Proxy Error"
+    - "Bad Gateway"
+    - "Gateway Timeout"
+    - "Service Unavailable"
+    - "403 Forbidden"
+    - "502 Bad Gateway"
+    - "503 Service Unavailable"
+    - "504 Gateway Timeout"
+    - "Connection refused"
+    - "Timed out"
+
+# Additional validation criteria
+require_status_code: 0       # Required HTTP status code (0 = any)
+require_content_match: ""    # Required content in response (empty = any)
+require_header_fields: []    # Required headers in response
+
+# ============================================================================
+# INTERACTSH SETTINGS (For out-of-band security testing)
+# ============================================================================
+# Interactsh is used for advanced vulnerability checks that require
+# external callback verification (e.g., SSRF, XXE, blind injection)
+interactsh_url: "https://interact.sh"
+interactsh_token: ""         # Leave empty for public server, or provide token for private
+
+# ============================================================================
+# ADVANCED SECURITY CHECKS
+# ============================================================================
+# Enable these checks to detect proxy vulnerabilities and misconfigurations.
+# WARNING: Some checks may be intrusive and could trigger security alerts.
+advanced_checks:
+  test_protocol_smuggling: false    # HTTP request smuggling detection
+  test_dns_rebinding: false         # DNS rebinding vulnerability detection
+  test_ipv6: false                  # IPv6 connectivity testing
+  test_http_methods: ["GET"]        # HTTP methods to test (GET, POST, PUT, DELETE, etc.)
+  test_cache_poisoning: false       # Cache poisoning vulnerability detection
+  test_host_header_injection: false # Host header injection detection
+  disable_interactsh: false         # Disable Interactsh for OOB testing
+
+# ============================================================================
+# CLOUD PROVIDER DETECTION
+# ============================================================================
+# Configuration for detecting if proxies are hosted on cloud platforms
+# and checking for cloud metadata access vulnerabilities
+cloud_providers:
+  - name: "AWS"
+    metadata_ips:
+      - "169.254.169.254"
+    metadata_urls:
+      - "http://169.254.169.254/latest/meta-data/"
+      - "http://169.254.169.254/latest/dynamic/instance-identity/"
+    metadata_headers:
+      "X-aws-ec2-metadata-token-ttl-seconds": "21600"
+    internal_ranges:
+      - "10.0.0.0/8"
+      - "172.16.0.0/12"
+      - "192.168.0.0/16"
+    org_names:
+      - "Amazon Technologies Inc."
+      - "Amazon.com, Inc."
+      - "Amazon Web Services"
+
+  - name: "GCP"
+    metadata_ips:
+      - "169.254.169.254"
+    metadata_urls:
+      - "http://metadata.google.internal/computeMetadata/v1/"
+      - "http://metadata/computeMetadata/v1/"
+    metadata_headers:
+      "Metadata-Flavor": "Google"
+    internal_ranges:
+      - "10.0.0.0/8"
+      - "172.16.0.0/12"
+      - "192.168.0.0/16"
+    org_names:
+      - "Google LLC"
+      - "Google Cloud"
+
+  - name: "Azure"
+    metadata_ips:
+      - "169.254.169.254"
+    metadata_urls:
+      - "http://169.254.169.254/metadata/instance"
+      - "http://169.254.169.254/metadata/identity"
+    metadata_headers:
+      "Metadata": "true"
+      "User-Agent": "curl/7.64.0"
+    internal_ranges:
+      - "10.0.0.0/8"
+      - "172.16.0.0/12"
+      - "192.168.0.0/16"
+    org_names:
+      - "Microsoft Corporation"
+      - "Microsoft Azure"
+
+  - name: "DigitalOcean"
+    metadata_ips:
+      - "169.254.169.254"
+    metadata_urls:
+      - "http://169.254.169.254/metadata/v1/"
+    metadata_headers:
+      "Metadata-Token": "do-metadata"
+    internal_ranges:
+      - "10.0.0.0/8"
+      - "172.16.0.0/12"
+      - "192.168.0.0/16"
+    org_names:
+      - "DigitalOcean, LLC"
+      - "DigitalOcean"
+
+# ============================================================================
+# PROTOCOL SUPPORT
+# ============================================================================
+enable_http2: true           # Enable HTTP/2 protocol detection and support
+enable_http3: false          # Enable HTTP/3 protocol detection (experimental)
+
+# ============================================================================
+# FINGERPRINTING
+# ============================================================================
+enable_fingerprint: true     # Enable proxy software fingerprinting
+
+# ============================================================================
+# CONNECTION POOLING (Performance optimization)
+# ============================================================================
+connection_pool:
+  max_idle_conns: 100
+  max_idle_conns_per_host: 10
+  max_conns_per_host: 50
+  idle_conn_timeout: "90s"
+  keep_alive_timeout: "30s"
+  tls_handshake_timeout: "10s"
+  expect_continue_timeout: "1s"
+  disable_keep_alives: false
+  disable_compression: false
+
+# ============================================================================
+# METRICS AND MONITORING
+# ============================================================================
+metrics:
+  enabled: false             # Enable Prometheus metrics export
+  listen_addr: ":9090"       # Metrics server address
+  path: "/metrics"           # Metrics endpoint path
+
+# ============================================================================
+# PROXY DISCOVERY (For finding new proxies)
+# ============================================================================
+# API credentials for proxy discovery sources
+# Set these via environment variables or command-line flags for security:
+#   SHODAN_API_KEY, CENSYS_API_ID, CENSYS_SECRET
+discovery:
+  shodan_api_key: ""         # Shodan API key
+  censys_api_key: ""         # Censys API ID
+  censys_secret: ""          # Censys API secret
+
+  # Discovery parameters
+  max_results: 1000          # Maximum candidates per search
+  countries: []              # Target countries (empty = all)
+  min_confidence: 0.3        # Minimum confidence score (0.0-1.0)
+  timeout: 30                # Request timeout in seconds
+  rate_limit: 60             # Requests per minute
+
+  # Filtering options
+  exclude_residential: true   # Exclude residential IP ranges
+  exclude_cdn: true          # Exclude CDN/cloud IPs
+  exclude_malicious: true    # Exclude known malicious IPs
+  required_ports: []         # Specific ports (empty = all)
+  excluded_asns: []          # ASNs to exclude
+
+  # Output options
+  output_format: "json"      # json, csv, txt
+  deduplicate: true          # Remove duplicates
+
+  # Security
+  enable_honeypot_filter: true  # Enable honeypot detection
+  honeypot_threshold: 0.4       # Suspicion threshold (0.0-1.0)

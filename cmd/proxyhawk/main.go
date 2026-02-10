@@ -215,14 +215,44 @@ func main() {
 		Format: "text",
 	})
 
+	// Initialize user config if using default and it doesn't exist
+	finalConfigPath := *configFile
+	if *configFile == "config/default.yaml" || *configFile == "config/client/default.yaml" {
+		userConfigPath, needsInit, err := config.GetConfigPath(*configFile)
+		if err != nil {
+			logger.Error("Failed to determine config path", "error", err)
+			os.Exit(1)
+		}
+
+		// If user config doesn't exist and we're using defaults, create it
+		if needsInit {
+			createdPath, created, err := config.EnsureUserConfig()
+			if err != nil {
+				logger.Warn("Could not create user config, using default",
+					"error", err,
+					"path", userConfigPath)
+				finalConfigPath = "config/client/default.yaml"
+			} else if created {
+				logger.Info("Created user configuration",
+					"path", createdPath,
+					"customize", "Edit this file to customize your settings")
+				finalConfigPath = createdPath
+			} else {
+				finalConfigPath = createdPath
+			}
+		} else {
+			finalConfigPath = userConfigPath
+		}
+	}
+
 	// Load and validate configuration
-	cfg, validationResult, err := config.ValidateAndLoad(*configFile)
+	cfg, validationResult, err := config.ValidateAndLoad(finalConfigPath)
 	if err != nil {
 		// Enhanced error logging with error categorization
 		category := errors.GetErrorCategory(err)
 		logger.Error("Failed to load configuration",
 			"error", err,
-			"file", *configFile,
+			"file", finalConfigPath,
 			"category", category,
 			"critical", errors.IsCritical(err))
 		os.Exit(1)
@@ -244,7 +274,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	logger.ConfigLoaded(*configFile)
+	logger.ConfigLoaded(finalConfigPath)
 
 	// Set up config hot-reloading if enabled
 	var configWatcher *config.ConfigWatcher

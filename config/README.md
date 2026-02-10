@@ -1,345 +1,445 @@
 # ProxyHawk Configuration Guide
 
-This directory contains configuration templates and examples for ProxyHawk. 
+ProxyHawk uses a flexible configuration system that supports multiple deployment scenarios. Configuration files are organized by purpose to make it easy to find and customize settings.
 
-**User configurations should be placed in `~/.config/proxyhawk/`** following XDG Base Directory specification.
+## 📁 Directory Structure
 
-## 📁 Configuration Files Overview
-
-### Server Configuration
-- **`server.example.yaml`** - Complete example for ProxyHawk server with all options documented
-- **`server.default.yaml`** - Default server configuration for development
-- **`production.yaml`** - Production-ready configuration with security hardening
-- **`development.yaml`** - Development configuration with debug features enabled
-
-### Specialized Configurations
-- **`multi-host.example.yaml`** - Multi-host deployment configuration
-- **`proxy-chaining.yaml`** - Advanced proxy chaining configuration examples
-- **`auth-example.yaml`** - Authentication and security configuration
-- **`metrics-example.yaml`** - Prometheus metrics and monitoring setup
-- **`connection-pool-example.yaml`** - Connection pooling and performance tuning
-- **`retry-example.yaml`** - Retry policies and error handling
-- **`discovery-example.yaml`** - Service discovery and health checking
+```
+config/
+├── client/              # ProxyHawk CLI configurations
+│   └── default.yaml     # Default client configuration (comprehensive)
+├── server/              # ProxyHawk Server configurations
+│   ├── server.default.yaml   # Default server configuration
+│   ├── server.example.yaml   # Fully documented server example
+│   ├── production.yaml       # Production-ready settings
+│   └── development.yaml      # Development settings
+├── examples/            # Example configurations for specific features
+│   ├── auth-example.yaml
+│   ├── connection-pool-example.yaml
+│   ├── discovery-example.yaml
+│   ├── metrics-example.yaml
+│   ├── retry-example.yaml
+│   ├── multi-host.example.yaml
+│   └── proxy-chaining.yaml
+├── default.yaml         # Symlink to client/default.yaml (for backward compatibility)
+└── README.md            # This file
+```
 
 ## 🚀 Quick Start
 
-### Basic Server Setup
+### ProxyHawk CLI (Proxy Checking)
+
+ProxyHawk automatically creates a user configuration file on first run:
 
 ```bash
-# Run the setup script to initialize config
-./scripts/setup-config.sh
+# First run - auto-generates ~/.config/proxyhawk/config.yaml
+./proxyhawk -l proxies.txt
 
-# Edit with your settings
-nano ~/.config/proxyhawk/server.yaml
+# The config is created at:
+# - Linux/macOS: ~/.config/proxyhawk/config.yaml
+# - Or: $XDG_CONFIG_HOME/proxyhawk/config.yaml if XDG_CONFIG_HOME is set
+```
 
-# Start the server (uses default config location)
+**To customize your settings:**
+
+```bash
+# Edit your user config
+nano ~/.config/proxyhawk/config.yaml
+
+# Or use a custom config file
+./proxyhawk -config /path/to/custom.yaml -l proxies.txt
+```
+
+**Configuration precedence (highest to lowest):**
+1. Command-line flags (`-t`, `-c`, `-rate-limit`, etc.)
+2. Environment variables (`SHODAN_API_KEY`, `CENSYS_API_ID`, etc.)
+3. User config file (`~/.config/proxyhawk/config.yaml`)
+4. Built-in defaults
+
+### ProxyHawk Server (Proxy/Agent Service)
+
+```bash
+# Use default server config
 ./proxyhawk-server
+
+# Use custom config
+./proxyhawk-server -config config/server/production.yaml
+
+# Override with environment variables
+PROXYHAWK_MODE=dual PROXYHAWK_SOCKS5_ADDR=:1080 ./proxyhawk-server
 ```
 
-### Docker Deployment
+## 📖 Configuration Files Explained
 
+### Client Configurations
+
+#### `client/default.yaml`
+- **Purpose**: Comprehensive default configuration for ProxyHawk CLI
+- **Use case**: Reference for all available options
+- **Auto-generated**: Copied to `~/.config/proxyhawk/config.yaml` on first run
+- **Features**: Proxy checking, vulnerability scanning, discovery, rate limiting, retries, cloud detection
+
+**Key sections:**
+- General settings (timeouts, TLS verification, concurrency)
+- Rate limiting (per-host, per-proxy, global)
+- Retry mechanism (exponential backoff, error patterns)
+- Authentication (basic, digest)
+- HTTP headers and user agent
+- Test URLs for validation
+- Response validation rules
+- Interactsh (OOB testing for vulnerabilities)
+- Advanced security checks (smuggling, cache poisoning, DNS rebinding)
+- Cloud provider detection (AWS, GCP, Azure, DigitalOcean)
+- Protocol support (HTTP/2, HTTP/3)
+- Fingerprinting
+- Connection pooling
+- Metrics (Prometheus)
+- Discovery settings (Shodan, Censys, honeypot filtering)
+
+### Server Configurations
+
+#### `server/server.default.yaml`
+- **Purpose**: Minimal working server configuration
+- **Use case**: Quick testing and development
+- **Features**: Basic dual-mode setup (SOCKS5 + HTTP proxy + WebSocket API)
+
+#### `server/server.example.yaml`
+- **Purpose**: Fully documented server configuration with all options
+- **Use case**: Learning what's configurable, creating custom configs
+- **Features**: Regional proxies, health checks, round-robin DNS detection, caching, metrics
+
+#### `server/production.yaml`
+- **Purpose**: Production-ready configuration with security hardening
+- **Use case**: Deploying to production environments
+- **Features**: Optimized timeouts, health monitoring, metrics enabled, security settings
+
+#### `server/development.yaml`
+- **Purpose**: Development-friendly configuration
+- **Use case**: Local testing and debugging
+- **Features**: Debug logging, relaxed timeouts, mock proxies
+
+### Example Configurations
+
+#### `examples/auth-example.yaml`
+- **Purpose**: Proxy authentication configuration
+- **Features**: Basic auth, digest auth, default credentials
+
+#### `examples/connection-pool-example.yaml`
+- **Purpose**: HTTP connection pool tuning
+- **Features**: Connection limits, timeouts, keep-alives
+
+#### `examples/discovery-example.yaml`
+- **Purpose**: Proxy discovery with Shodan/Censys
+- **Features**: API credentials, search filters, honeypot detection
+
+#### `examples/metrics-example.yaml`
+- **Purpose**: Prometheus metrics configuration
+- **Features**: Metrics endpoint, exporters, custom metrics
+
+#### `examples/retry-example.yaml`
+- **Purpose**: Retry logic and error handling
+- **Features**: Exponential backoff, retryable errors, circuit breakers
+
+#### `examples/multi-host.example.yaml`
+- **Purpose**: Multi-region proxy configuration
+- **Features**: Regional proxy pools, load balancing
+
+#### `examples/proxy-chaining.yaml`
+- **Purpose**: Advanced proxy chaining setup
+- **Features**: Multi-hop proxies, Tor integration
+
+## 🔧 Common Configuration Tasks
+
+### Enable Vulnerability Scanning
+
+Edit `~/.config/proxyhawk/config.yaml`:
+
+```yaml
+# Enable advanced security checks
+advanced_checks:
+  test_protocol_smuggling: true     # HTTP request smuggling
+  test_dns_rebinding: true          # DNS rebinding attacks
+  test_cache_poisoning: true        # Cache poisoning
+  test_host_header_injection: true  # Host header injection
+  test_ipv6: true                   # IPv6 support testing
+  test_http_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "TRACE"]
+
+# Enable fingerprinting to detect proxy software
+enable_fingerprint: true
+
+# Configure Interactsh for out-of-band testing
+interactsh_url: "https://interact.sh"
+interactsh_token: ""  # Optional: use your own Interactsh server
+```
+
+### Set Up Proxy Discovery
+
+```yaml
+discovery:
+  # API credentials (use environment variables for security)
+  shodan_api_key: ""  # Or set SHODAN_API_KEY env var
+  censys_api_key: ""  # Or set CENSYS_API_ID env var
+  censys_secret: ""   # Or set CENSYS_SECRET env var
+
+  # Search parameters
+  max_results: 1000
+  countries: ["US", "GB", "DE"]  # Target specific countries
+  min_confidence: 0.5            # Higher = fewer but better results
+
+  # Security filters
+  enable_honeypot_filter: true   # Automatically detect and filter honeypots
+  honeypot_threshold: 0.4        # Suspicion threshold (0.0-1.0)
+  exclude_residential: true      # Exclude residential IPs
+  exclude_cdn: true              # Exclude CDN/cloud IPs
+```
+
+**Use discovery:**
 ```bash
-# Use the production configuration
-docker-compose up -d
-# Configuration is automatically mounted from config/production.yaml
+# Discover proxies using Shodan (requires API key)
+export SHODAN_API_KEY="your-key-here"
+./proxyhawk -discover -country US -max-results 500
+
+# Discover from free sources (no API key required)
+./proxyhawk -discover -source free
 ```
 
-## 📖 Configuration Reference
-
-### Server Modes
-
-ProxyHawk supports three operational modes:
-
-- **`proxy`** - Traditional proxy server only (SOCKS5 + HTTP)
-- **`agent`** - Geographic testing service only (WebSocket API)
-- **`dual`** - Both proxy and testing capabilities (recommended)
-
-### Core Settings
+### Enable Rate Limiting
 
 ```yaml
-# Server operation mode
-mode: dual
-
-# Network addresses
-socks5_addr: ":1080"    # SOCKS5 proxy port
-http_addr: ":8080"      # HTTP proxy port  
-api_addr: ":8888"       # WebSocket API port
-
-# Proxy selection strategy
-selection_strategy: smart  # random, round_robin, smart, weighted
+# Prevent IP bans by rate limiting requests
+rate_limit_enabled: true
+rate_limit_delay: 2s           # 2 seconds between requests
+rate_limit_per_host: true      # Rate limit per target host
+rate_limit_per_proxy: false    # Don't rate limit per proxy (faster checking)
 ```
 
-### Regional Proxy Configuration
+### Configure Retry Logic
 
 ```yaml
-regions:
-  us-west:
-    name: "US West Coast"
-    proxies:
-      - url: "socks5://proxy1.example.com:1080"
-        weight: 10
-        health_check_url: "http://httpbin.org/ip"
-      - url: "http://proxy2.example.com:8080"  
-        weight: 8
-        health_check_url: "http://httpbin.org/ip"
-  
-  eu-west:
-    name: "Western Europe"
-    proxies:
-      - url: "socks5://eu-proxy.example.com:1080"
-        weight: 10
-        health_check_url: "http://httpbin.org/ip"
+retry_enabled: true
+max_retries: 3
+initial_retry_delay: 1s
+max_retry_delay: 30s
+backoff_factor: 2.0
+retryable_errors:
+  - "connection refused"
+  - "connection timed out"
+  - "i/o timeout"
 ```
 
-### Advanced Features
+### Enable Cloud Detection
 
-#### Round-Robin DNS Detection
 ```yaml
-round_robin_detection:
-  enabled: true
-  min_samples: 5
-  sample_interval: 2s
-  confidence_threshold: 0.85
+enable_cloud_checks: true
+
+# Cloud providers are already configured by default
+# (AWS, GCP, Azure, DigitalOcean)
 ```
 
-#### Health Checking  
-```yaml
-health_check:
-  enabled: true
-  interval: 1m
-  timeout: 10s
-  failure_threshold: 3
-  success_threshold: 2
-```
+### Enable Metrics Export
 
-#### DNS Caching
-```yaml
-cache:
-  enabled: true
-  ttl: 5m
-  max_entries: 10000
-```
-
-#### Metrics and Monitoring
 ```yaml
 metrics:
   enabled: true
-  addr: ":9090"
+  listen_addr: ":9090"
   path: "/metrics"
 ```
 
-### Security Configuration
+Then access metrics at: `http://localhost:9090/metrics`
 
-#### Authentication (Future Feature)
+### Optimize Performance
+
 ```yaml
-auth:
-  enabled: false
-  method: "token"  # token, basic, oauth
-  tokens:
-    - "your-secure-token-here"
+# Increase concurrency for faster scanning
+concurrency: 50
+
+# Connection pooling for better performance
+connection_pool:
+  max_idle_conns: 200
+  max_idle_conns_per_host: 20
+  max_conns_per_host: 100
+  idle_conn_timeout: "90s"
+  keep_alive_timeout: "30s"
+
+# Enable HTTP/2 for modern proxies
+enable_http2: true
 ```
 
-#### TLS Configuration
-```yaml
-tls:
-  enabled: false
-  cert_file: "/path/to/cert.pem"
-  key_file: "/path/to/key.pem"
-  ca_file: "/path/to/ca.pem"  # For client cert validation
+## 🔐 Security Best Practices
+
+### 1. API Credentials
+
+**Never commit API keys to version control!**
+
+Use environment variables:
+```bash
+export SHODAN_API_KEY="your-key-here"
+export CENSYS_API_ID="your-id-here"
+export CENSYS_SECRET="your-secret-here"
 ```
 
-## 🔧 Environment-Specific Configurations
+Or use a separate credentials file outside the repo:
+```bash
+./proxyhawk -config ~/.config/proxyhawk/config.yaml -l proxies.txt
+```
 
-### Development Environment
-- Debug logging enabled
-- Relaxed timeouts
-- Mock proxies for testing
-- Hot reload capabilities
+### 2. TLS Verification
 
-### Production Environment  
-- Security hardening
-- Performance optimization
-- Monitoring and alerting
-- Backup and recovery
+For production use, enable TLS verification:
+```yaml
+insecure_skip_verify: false  # Verify TLS certificates
+```
 
-### Testing Environment
-- Isolated test proxies
-- Extended logging
-- Chaos engineering support
-- Load testing configurations
+For testing/development only:
+```yaml
+insecure_skip_verify: true   # WARNING: insecure, for testing only
+```
 
-## 📊 Configuration Validation
+### 3. Rate Limiting
 
-ProxyHawk validates all configuration files on startup:
+Always use rate limiting when scanning public targets:
+```yaml
+rate_limit_enabled: true
+rate_limit_delay: 2s  # Adjust based on target sensitivity
+```
+
+### 4. Proxy Authentication
+
+Store credentials securely (not in config files):
+```yaml
+auth_enabled: true
+default_username: ""  # Set via environment variable
+default_password: ""  # Set via environment variable
+```
 
 ```bash
-# Validate using default config location
-./proxyhawk-server -help
-
-# Validate specific config file
-./proxyhawk-server -config ~/.config/proxyhawk/server.yaml -help
+export PROXY_USERNAME="user"
+export PROXY_PASSWORD="pass"
 ```
 
 ## 🐳 Docker Configuration
 
-### Environment Variables
-
-All YAML configuration options can be overridden with environment variables:
-
-```bash
-# Override server mode
-PROXYHAWK_MODE=dual
-
-# Override addresses
-PROXYHAWK_SOCKS5_ADDR=:1080
-PROXYHAWK_HTTP_ADDR=:8080
-PROXYHAWK_API_ADDR=:8888
-
-# Override regions (JSON format)
-PROXYHAWK_REGIONS='{"us-west":{"name":"US West","proxies":[...]}}'
-
-# Override logging
-PROXYHAWK_LOG_LEVEL=debug
-PROXYHAWK_LOG_FORMAT=json
-```
-
-### Docker Compose Override
+Docker deployments use volume mounts for configuration:
 
 ```yaml
-# docker-compose.override.yml
+# docker-compose.yml
 version: '3.8'
 services:
   proxyhawk-server:
-    environment:
-      - PROXYHAWK_LOG_LEVEL=debug
-      - PROXYHAWK_METRICS_ENABLED=true
+    image: proxyhawk:latest
     volumes:
-      - ./config/development.yaml:/app/config.yaml:ro
+      - ./config/server/production.yaml:/app/config.yaml:ro
+    ports:
+      - "1080:1080"  # SOCKS5
+      - "8080:8080"  # HTTP
+      - "8888:8888"  # WebSocket API
 ```
 
-## 🔍 Configuration Examples by Use Case
-
-### 1. Basic Proxy Server
-```yaml
-mode: proxy
-socks5_addr: ":1080"
-http_addr: ":8080"
-log_level: info
+Override with environment variables:
+```bash
+docker run -e PROXYHAWK_MODE=dual \
+           -e PROXYHAWK_LOG_LEVEL=debug \
+           proxyhawk:latest
 ```
 
-### 2. Geographic Testing Service
-```yaml
-mode: agent
-api_addr: ":8888"
-regions:
-  us-west: {...}
-  eu-west: {...}
-round_robin_detection:
-  enabled: true
+## 🔍 Troubleshooting
+
+### Config file not found
+
+```bash
+# Check which config is being used
+./proxyhawk -h
+
+# Verify user config location
+ls -la ~/.config/proxyhawk/config.yaml
+
+# Force regenerate user config
+rm ~/.config/proxyhawk/config.yaml
+./proxyhawk -l proxies.txt
 ```
 
-### 3. Enterprise Deployment
-```yaml
-mode: dual
-selection_strategy: smart
-health_check:
-  enabled: true
-  interval: 30s
-metrics:
-  enabled: true
-auth:
-  enabled: true
-tls:
-  enabled: true
+### Invalid YAML syntax
+
+```bash
+# Validate YAML
+yamllint ~/.config/proxyhawk/config.yaml
+
+# Check for common issues:
+# - Tabs instead of spaces (YAML requires spaces)
+# - Misaligned indentation
+# - Missing colons or quotes
 ```
 
-### 4. High-Performance Setup
-```yaml
-connection_pool:
-  max_idle_conns: 100
-  idle_timeout: 90s
-  keep_alive: 30s
-cache:
-  enabled: true
-  max_entries: 50000
-  ttl: 10m
+### Configuration not taking effect
+
+Check precedence:
+1. CLI flags override everything
+2. Environment variables override config file
+3. Config file overrides defaults
+
+```bash
+# See what config is loaded
+./proxyhawk -d -l proxies.txt 2>&1 | grep "Config loaded"
 ```
 
-## 🚨 Security Best Practices
+### Permission denied on ~/.config/proxyhawk
 
-### 1. Production Deployment
-- Use TLS encryption for all connections
-- Enable authentication for WebSocket API
-- Restrict API access with firewall rules
-- Regular security updates and monitoring
-
-### 2. Proxy Configuration
-- Validate proxy URLs and credentials
-- Use health checks to detect compromised proxies
-- Rotate proxy credentials regularly
-- Monitor for unusual traffic patterns
-
-### 3. Logging and Monitoring
-- Enable structured logging in production
-- Monitor proxy performance and availability
-- Set up alerting for failures and security events
-- Regular log analysis and cleanup
-
-## 🔧 Troubleshooting
-
-### Common Configuration Issues
-
-1. **Invalid YAML syntax**
-   ```bash
-   # Validate YAML syntax
-   yamllint config/server.yaml
-   ```
-
-2. **Port conflicts**
-   ```bash
-   # Check port availability
-   netstat -tulpn | grep :1080
-   ```
-
-3. **Proxy connectivity**
-   ```bash
-   # Test proxy manually
-   curl --proxy socks5://proxy.example.com:1080 http://httpbin.org/ip
-   ```
-
-### Configuration Debugging
-
-```yaml
-# Enable debug logging
-log_level: debug
-log_format: json
-
-# Enable configuration validation
-validate_config: true
-
-# Test mode for development
-test_mode:
-  enabled: true
-  mock_proxies: true
-  skip_health_checks: false
+```bash
+# Fix permissions
+mkdir -p ~/.config/proxyhawk
+chmod 755 ~/.config/proxyhawk
 ```
 
 ## 📚 Additional Resources
 
-- [ProxyHawk Architecture Guide](../docs/architecture.md)
-- [API Documentation](../docs/api.md)
-- [Docker Deployment Guide](../docs/docker.md)
-- [Client Libraries](../clients/README.md)
-- [Contributing Guidelines](../CONTRIBUTING.md)
+- [Main README](../README.md) - Full ProxyHawk documentation
+- [CLAUDE.md](../CLAUDE.md) - Architecture and development guide
+- [Examples](examples/) - Feature-specific configuration examples
+- [GitHub Issues](https://github.com/ResistanceIsUseless/ProxyHawk/issues) - Report problems or request features
 
-## 📧 Support
+## 🎓 Configuration Examples by Use Case
 
-For configuration help and support:
-- GitHub Issues: [ProxyHawk Issues](https://github.com/ResistanceIsUseless/ProxyHawk/issues)
-- Documentation: [docs/](../docs/)
-- Examples: [examples/](../examples/)
+### Basic Proxy Testing
+```yaml
+timeout: 10
+concurrency: 10
+enable_cloud_checks: false
+enable_anonymity_check: true
+```
+
+### Security Research
+```yaml
+timeout: 30
+concurrency: 5
+enable_fingerprint: true
+advanced_checks:
+  test_protocol_smuggling: true
+  test_cache_poisoning: true
+  test_host_header_injection: true
+```
+
+### Large-Scale Discovery
+```yaml
+concurrency: 100
+rate_limit_enabled: true
+rate_limit_delay: 500ms
+discovery:
+  max_results: 10000
+  enable_honeypot_filter: true
+```
+
+### Production Monitoring
+```yaml
+retry_enabled: true
+max_retries: 3
+metrics:
+  enabled: true
+connection_pool:
+  max_idle_conns: 200
+```
 
 ---
 
-**Last Updated**: 2024-08-07  
-**Version**: 1.0.0
+**Last Updated**: 2026-02-09
+**Version**: 1.3.0
+**ProxyHawk**: https://github.com/ResistanceIsUseless/ProxyHawk

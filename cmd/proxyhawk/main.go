@@ -702,11 +702,7 @@ func processResults(state *AppState) {
 func (s *AppState) startCheckingCmd() tea.Cmd {
 	return func() tea.Msg {
 		// Run in goroutine so it doesn't block
-		go func() {
-			s.startChecking()
-			// Send completion message when done
-			s.updateChan <- allChecksCompleteMsg{totalChecked: len(s.proxies)}
-		}()
+		go s.startChecking()
 		// Return immediately with a started message
 		return checkingStartedMsg{}
 	}
@@ -1070,6 +1066,9 @@ func (s *AppState) startChecking() {
 			s.updateChan <- progressUpdateMsg{}
 		}
 	}
+
+	// Send completion message before closing channel
+	s.updateChan <- allChecksCompleteMsg{totalChecked: len(s.proxies)}
 
 	// Close the update channel
 	close(s.updateChan)

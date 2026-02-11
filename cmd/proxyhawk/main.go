@@ -247,8 +247,8 @@ func main() {
 		}
 	}
 
-	// Load and validate configuration
-	cfg, validationResult, err := config.ValidateAndLoad(finalConfigPath)
+	// Load configuration (without validation yet - we'll validate after mode overrides)
+	cfg, err := config.LoadConfig(finalConfigPath)
 	if err != nil {
 		// Enhanced error logging with error categorization
 		category := errors.GetErrorCategory(err)
@@ -260,57 +260,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Log validation warnings if any
-	if len(validationResult.Warnings) > 0 {
-		for _, warning := range validationResult.Warnings {
-			logger.Warn("Configuration validation warning", "warning", warning)
-		}
-	}
-
-	// Check for validation errors
-	if !validationResult.Valid {
-		logger.Error("Configuration validation failed", "errors", len(validationResult.Errors))
-		for _, validationErr := range validationResult.Errors {
-			logger.Error("Configuration error", "error", validationErr.Error())
-		}
-		os.Exit(1)
-	}
-
 	logger.ConfigLoaded(finalConfigPath)
-
-	// Set up config hot-reloading if enabled
-	var configWatcher *config.ConfigWatcher
-	if *hotReload {
-		watcherConfig := config.WatcherConfig{
-			DebounceDelay:        1 * time.Second,
-			ValidateBeforeReload: true,
-			OnReload: func(newConfig *config.Config, result *config.ValidationResult) {
-				logger.Info("Configuration reloaded successfully", "file", *configFile)
-
-				// Log any warnings
-				for _, warning := range result.Warnings {
-					logger.Warn("Configuration warning after reload", "warning", warning)
-				}
-
-				// Note: We don't update the running configuration here because
-				// that would require stopping and restarting workers, which is complex.
-				// For now, hot-reload will take effect on the next run.
-				logger.Info("Configuration changes will take effect on next proxy check run")
-			},
-			OnError: func(err error) {
-				logger.Error("Configuration reload failed", "error", err)
-			},
-		}
-
-		var err error
-		configWatcher, err = config.NewConfigWatcher(*configFile, watcherConfig)
-		if err != nil {
-			logger.Warn("Failed to enable configuration hot-reloading", "error", err)
-			// Continue without hot-reload
-		} else {
-			logger.Info("Configuration hot-reloading enabled", "file", *configFile)
-		}
-	}
 
 	// Override config with command line flags if specified
 	if *concurrency > 0 {
@@ -340,7 +290,7 @@ func main() {
 		cfg.EnableFingerprint = true
 	}
 
-	// Apply check mode settings
+	// Apply check mode settings (BEFORE validation so warnings are accurate)
 	if *enableAdvancedChecks {
 		// Explicit --advanced flag enables all checks
 		cfg.AdvancedChecks.TestSSRF = true
@@ -390,6 +340,59 @@ func main() {
 			cfg.AdvancedChecks.TestDNSRebinding = false
 			cfg.AdvancedChecks.TestCachePoisoning = false
 			cfg.AdvancedChecks.TestIPv6 = false
+		}
+	}
+
+	// NOW validate configuration (after mode overrides have been applied)
+	validationResult := config.ValidateConfig(cfg)
+
+	// Log validation warnings if any
+	if len(validationResult.Warnings) > 0 {
+		for _, warning := range validationResult.Warnings {
+			logger.Warn("Configuration validation warning", "warning", warning)
+		}
+	}
+
+	// Check for validation errors
+	if !validationResult.Valid {
+		logger.Error("Configuration validation failed", "errors", len(validationResult.Errors))
+		for _, validationErr := range validationResult.Errors {
+			logger.Error("Configuration error", "error", validationErr.Error())
+		}
+		os.Exit(1)
+	}
+
+	// Set up config hot-reloading if enabled
+	var configWatcher *config.ConfigWatcher
+	if *hotReload {
+		watcherConfig := config.WatcherConfig{
+			DebounceDelay:        1 * time.Second,
+			ValidateBeforeReload: true,
+			OnReload: func(newConfig *config.Config, result *config.ValidationResult) {
+				logger.Info("Configuration reloaded successfully", "file", *configFile)
+
+				// Log any warnings
+				for _, warning := range result.Warnings {
+					logger.Warn("Configuration warning after reload", "warning", warning)
+				}
+
+				// Note: We don't update the running configuration here because
+				// that would require stopping and restarting workers, which is complex.
+				// For now, hot-reload will take effect on the next run.
+				logger.Info("Configuration changes will take effect on next proxy check run")
+			},
+			OnError: func(err error) {
+				logger.Error("Configuration reload failed", "error", err)
+			},
+		}
+
+		var err error
+		configWatcher, err = config.NewConfigWatcher(*configFile, watcherConfig)
+		if err != nil {
+			logger.Warn("Failed to enable configuration hot-reloading", "error", err)
+			// Continue without hot-reload
+		} else {
+			logger.Info("Configuration hot-reloading enabled", "file", *configFile)
 		}
 	}
 
@@ -542,7 +545,7 @@ func main() {
 
 		// Fingerprinting settings
 		EnableFingerprint: cfg.EnableFingerprint,
-	}, *debug || cfg.AdvancedChecks.TestProtocolSmuggling || cfg.AdvancedChecks.TestDNSRebinding)
+	}, *debug || cfg.AdvancedChecks.TestProtocolSmuggling || cfg.AdvancedChecks.TestDNSRebinding, logger)
 
 	// Initialize UI
 	p := progress.New(
@@ -1387,7 +1390,7 @@ func runDiscoveryMode(cfg *config.Config, logger *logging.Logger, source, query 
 			DefaultHeaders:      cfg.DefaultHeaders,
 			UserAgent:           cfg.UserAgent,
 			ConnectionPool:      connectionPool,
-		}, false) // Don't use debug mode for validation
+		}, false, logger) // Don't use debug mode for validation
 
 		// Validate proxies concurrently
 		workingCandidates := make([]*discovery.ProxyCandidate, 0)

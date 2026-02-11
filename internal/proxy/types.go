@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/ResistanceIsUseless/ProxyHawk/internal/cloudcheck"
+	"github.com/ResistanceIsUseless/ProxyHawk/internal/logging"
 )
 
 // ProxyType represents the type of proxy
@@ -141,12 +142,14 @@ type ProxyResult struct {
 	GenericVulnerabilities  *GenericVulnResult  `json:"generic_vulnerabilities,omitempty"`
 	ExtendedVulnerabilities *ExtendedVulnResult `json:"extended_vulnerabilities,omitempty"`
 	VendorVulnerabilities   *VendorVulnResult   `json:"vendor_vulnerabilities,omitempty"`
+	AdvancedSSRFVulnerabilities *AdvancedSSRFResult `json:"advanced_ssrf_vulnerabilities,omitempty"`
 }
 
 // Checker represents the main proxy checker
 type Checker struct {
 	config          Config
 	debug           bool
+	logger          *logging.Logger      // Logger for output
 	rateLimiter     map[string]time.Time // Map of host to last request time
 	rateLimiterLock sync.Mutex           // Mutex to protect the rate limiter map
 }

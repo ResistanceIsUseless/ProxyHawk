@@ -19,7 +19,7 @@ func TestCreateClient(t *testing.T) {
 		ValidationURL: "https://api.ipify.org?format=json",
 	}
 
-	checker := NewChecker(config, false)
+	checker := NewChecker(config, false, nil)
 
 	tests := []struct {
 		name     string
@@ -112,7 +112,7 @@ func TestCreateClientWithConnectionPool(t *testing.T) {
 		ConnectionPool: mockPool,
 	}
 
-	checker := NewChecker(config, false)
+	checker := NewChecker(config, false, nil)
 	result := &ProxyResult{}
 	
 	parsedURL, _ := url.Parse("http://proxy.example.com:8080")
@@ -154,7 +154,7 @@ func TestClientTimeout(t *testing.T) {
 				ValidationURL: "https://api.ipify.org?format=json",
 			}
 
-			checker := NewChecker(config, false)
+			checker := NewChecker(config, false, nil)
 			result := &ProxyResult{}
 			parsedURL, _ := url.Parse("http://proxy.example.com:8080")
 
@@ -180,7 +180,7 @@ func TestMakeRequest(t *testing.T) {
 		ValidationURL: "https://httpbin.org/ip", // Use a real endpoint for testing
 	}
 
-	checker := NewChecker(config, false)
+	checker := NewChecker(config, false, nil)
 	result := &ProxyResult{}
 
 	// Create a basic HTTP client (no proxy)
@@ -293,7 +293,7 @@ func BenchmarkDetermineProxyType(b *testing.B) {
 		},
 	}
 
-	checker := NewChecker(config, false)
+	checker := NewChecker(config, false, nil)
 	proxyURL, _ := url.Parse("http://proxy.example.com:8080")
 	result := &ProxyResult{}
 
@@ -311,7 +311,7 @@ func BenchmarkMakeRequest(b *testing.B) {
 		ValidationURL: "https://httpbin.org/ip",
 	}
 
-	checker := NewChecker(config, false)
+	checker := NewChecker(config, false, nil)
 	client := &http.Client{Timeout: config.Timeout}
 	result := &ProxyResult{}
 

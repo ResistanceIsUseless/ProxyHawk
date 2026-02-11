@@ -11,13 +11,15 @@ import (
 	"time"
 
 	"github.com/ResistanceIsUseless/ProxyHawk/internal/errors"
+	"github.com/ResistanceIsUseless/ProxyHawk/internal/logging"
 )
 
 // NewChecker creates a new proxy checker
-func NewChecker(config Config, debug bool) *Checker {
+func NewChecker(config Config, debug bool, logger *logging.Logger) *Checker {
 	checker := &Checker{
 		config:      config,
 		debug:       debug,
+		logger:      logger,
 		rateLimiter: make(map[string]time.Time),
 	}
 
@@ -62,10 +64,27 @@ func (c *Checker) Check(proxyURL string) *ProxyResult {
 	// Determine proxy type
 	proxyType, client, err := c.determineProxyType(parsedURL, result)
 	if err != nil {
+		// Proxy doesn't work as a forward proxy, but it might still have vulnerabilities
+		// Try direct vulnerability scanning as fallback if advanced checks are enabled
+		if c.hasAdvancedChecks() {
+			if c.debug {
+				result.DebugInfo += fmt.Sprintf("[FALLBACK] Proxy connection failed, attempting direct vulnerability scan\n")
+			}
+
+			// Try to scan the target as a web server directly
+			if directResult := c.performDirectScan(parsedURL, result); directResult {
+				// Direct scan found something useful
+				if c.debug {
+					result.DebugInfo += fmt.Sprintf("[FALLBACK] Direct scan completed with findings\n")
+				}
+				return result
+			}
+		}
+
 		// Create a more concise error message
 		result.Error = errors.NewProxyError(errors.ErrorProxyNotWorking, "proxy check failed", proxyURL, err)
 		if c.debug {
-			result.DebugInfo += fmt.Sprintf("[RESULT] Proxy type detection failed: %v\n", err)
+			result.DebugInfo += fmt.Sprintf("[RESULT] Proxy type detection failed and no vulnerabilities found: %v\n", err)
 		}
 		return result
 	}
@@ -886,4 +905,812 @@ func (c *Checker) makeRequest(client *http.Client, urlStr string, result *ProxyR
 	}
 
 	return resp, err
+}
+
+// performDirectScan attempts to scan the target directly as a web server when proxy connection fails
+// This allows us to detect SSRF vulnerabilities, misconfigurations, and information leaks
+// even when the target doesn't function as a forward proxy
+func (c *Checker) performDirectScan(proxyURL *url.URL, result *ProxyResult) bool {
+	foundSomething := false
+
+	// Extract the target host and port
+	targetHost := proxyURL.Hostname()
+	targetPort := proxyURL.Port()
+	if targetPort == "" {
+		if proxyURL.Scheme == "https" || proxyURL.Scheme == "socks5" {
+			targetPort = "443"
+		} else {
+			targetPort = "80"
+		}
+	}
+
+	// Build the target URL
+	targetURL := fmt.Sprintf("http://%s:%s", targetHost, targetPort)
+
+	if c.debug {
+		result.DebugInfo += fmt.Sprintf("[DIRECT SCAN] Attempting direct vulnerability scan on %s\n", targetURL)
+	}
+
+	// Create a direct HTTP client (not using the target as a proxy)
+	directClient := &http.Client{
+		Timeout: c.config.Timeout,
+		Transport: &http.Transport{
+			MaxIdleConns:        100,
+			MaxIdleConnsPerHost: 10,
+			MaxConnsPerHost:     50,
+			IdleConnTimeout:     90 * time.Second,
+			DisableKeepAlives:   false,
+		},
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse // Don't follow redirects
+		},
+	}
+
+	// Test 1: Try to access root path to see if it responds
+	req, err := http.NewRequest("GET", targetURL, nil)
+	if err != nil {
+		if c.debug {
+			result.DebugInfo += fmt.Sprintf("[DIRECT SCAN] Failed to create request: %v\n", err)
+		}
+		return false
+	}
+
+	req.Header.Set("User-Agent", c.config.UserAgent)
+	for key, value := range c.config.DefaultHeaders {
+		req.Header.Set(key, value)
+	}
+
+	resp, err := directClient.Do(req)
+	if err != nil {
+		if c.debug {
+			result.DebugInfo += fmt.Sprintf("[DIRECT SCAN] No response from target: %v\n", err)
+		}
+		return false
+	}
+	defer resp.Body.Close()
+
+	// Read response body
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		if c.debug {
+			result.DebugInfo += fmt.Sprintf("[DIRECT SCAN] Failed to read response: %v\n", err)
+		}
+		return false
+	}
+
+	if c.debug {
+		result.DebugInfo += fmt.Sprintf("[DIRECT SCAN] Received response: HTTP %d (%d bytes)\n", resp.StatusCode, len(body))
+	}
+
+	// Mark as not working as proxy, but note we got a response
+	result.Working = false
+	result.Type = ProxyTypeUnknown
+
+	// Check for information leaks in headers
+	leakedInfo := []string{}
+
+	// Check for server header
+	if serverHeader := resp.Header.Get("Server"); serverHeader != "" {
+		leakedInfo = append(leakedInfo, fmt.Sprintf("Server: %s", serverHeader))
+		foundSomething = true
+	}
+
+	// Check for internal IP leaks
+	internalHeaders := []string{
+		"X-Forwarded-For", "X-Real-IP", "X-Original-IP", "X-Client-IP",
+		"X-Forwarded-Host", "X-Forwarded-Server", "Via", "X-Proxy-ID",
+	}
+
+	for _, header := range internalHeaders {
+		if value := resp.Header.Get(header); value != "" {
+			// Check if it contains internal IP addresses
+			if strings.Contains(value, "10.") || strings.Contains(value, "172.") ||
+				strings.Contains(value, "192.168.") || strings.Contains(value, "127.0.0.1") {
+				leakedInfo = append(leakedInfo, fmt.Sprintf("%s: %s [INTERNAL IP LEAK]", header, value))
+				foundSomething = true
+			}
+		}
+	}
+
+	// Check response body for server identification
+	bodyStr := string(body)
+	bodyLower := strings.ToLower(bodyStr)
+
+	serverTypes := []string{"nginx", "apache", "haproxy", "traefik", "envoy", "kong", "varnish", "squid"}
+	for _, serverType := range serverTypes {
+		if strings.Contains(bodyLower, serverType) {
+			leakedInfo = append(leakedInfo, fmt.Sprintf("Server type in body: %s", serverType))
+			foundSomething = true
+			break
+		}
+	}
+
+	// Check for kubernetes or cloud-specific headers
+	cloudHeaders := map[string]string{
+		"X-Kong-Upstream-Latency": "Kong API Gateway",
+		"X-Kong-Proxy-Latency":    "Kong API Gateway",
+		"CF-Ray":                  "Cloudflare",
+		"X-Amz-Cf-Id":             "AWS CloudFront",
+		"X-Azure-Ref":             "Azure",
+		"X-GUploader-UploadID":    "Google Cloud",
+	}
+
+	for header, service := range cloudHeaders {
+		if resp.Header.Get(header) != "" {
+			leakedInfo = append(leakedInfo, fmt.Sprintf("%s detected", service))
+			foundSomething = true
+		}
+	}
+
+	// Add findings to result
+	if len(leakedInfo) > 0 {
+		result.DebugInfo += fmt.Sprintf("[DIRECT SCAN] Information leaks detected:\n")
+		for _, info := range leakedInfo {
+			result.DebugInfo += fmt.Sprintf("  - %s\n", info)
+		}
+
+		// Store findings in a check result
+		checkResult := CheckResult{
+			URL:        targetURL,
+			Success:    true,
+			StatusCode: resp.StatusCode,
+			BodySize:   int64(len(body)),
+			Error:      fmt.Sprintf("Not a working proxy, but detected: %s", strings.Join(leakedInfo, ", ")),
+		}
+		result.CheckResults = append(result.CheckResults, checkResult)
+	}
+
+	// Test 2: Try common SSRF targets to see if server will proxy them
+	if c.hasSSRFChecks() {
+		if c.debug {
+			result.DebugInfo += fmt.Sprintf("[DIRECT SCAN] Testing for SSRF vulnerabilities\n")
+		}
+
+		ssrfTargets := []string{
+			"http://169.254.169.254/latest/meta-data/", // AWS metadata
+			"http://metadata.google.internal/",          // GCP metadata
+			"http://localhost:8080/",                    // Localhost
+			"http://127.0.0.1:6379/",                    // Redis
+		}
+
+		for _, ssrfTarget := range ssrfTargets {
+			// Try to make the target fetch the SSRF URL
+			testURL := fmt.Sprintf("%s?url=%s", targetURL, url.QueryEscape(ssrfTarget))
+			req, err := http.NewRequest("GET", testURL, nil)
+			if err != nil {
+				continue
+			}
+
+			req.Header.Set("User-Agent", c.config.UserAgent)
+			resp, err := directClient.Do(req)
+			if err != nil {
+				continue
+			}
+
+			body, err := io.ReadAll(resp.Body)
+			resp.Body.Close()
+
+			if err == nil && len(body) > 0 {
+				// Check if response contains metadata-like content
+				bodyStr := string(body)
+				if strings.Contains(bodyStr, "ami-id") || strings.Contains(bodyStr, "instance-id") ||
+					strings.Contains(bodyStr, "metadata") || strings.Contains(bodyStr, "computeMetadata") {
+					result.DebugInfo += fmt.Sprintf("[DIRECT SCAN] ⚠️  Possible SSRF vulnerability: target may fetch %s\n", ssrfTarget)
+					foundSomething = true
+
+					checkResult := CheckResult{
+						URL:        testURL,
+						Success:    true,
+						StatusCode: resp.StatusCode,
+						BodySize:   int64(len(body)),
+						Error:      fmt.Sprintf("POSSIBLE SSRF: Target may be vulnerable to SSRF via URL parameter"),
+					}
+					result.CheckResults = append(result.CheckResults, checkResult)
+					break
+				}
+			}
+		}
+	}
+
+	// Test 3: Run all advanced security checks using the direct client
+	// Initialize Interactsh tester unless explicitly disabled
+	var tester *InteractshTester
+	if !c.config.AdvancedChecks.DisableInteractsh {
+		if c.debug {
+			result.DebugInfo += fmt.Sprintf("[DIRECT SCAN] Initializing Interactsh for OOB testing\n")
+		}
+		var interactshErr error
+		tester, interactshErr = NewInteractshTester()
+		if interactshErr != nil {
+			if c.debug {
+				result.DebugInfo += fmt.Sprintf("[DIRECT SCAN] Failed to initialize Interactsh tester: %v\nFalling back to basic checks.\n", interactshErr)
+			}
+		}
+		if tester != nil {
+			defer tester.Close()
+			if c.debug {
+				result.DebugInfo += fmt.Sprintf("[DIRECT SCAN] Interactsh initialized successfully\n")
+			}
+		}
+	}
+
+	// Use target URL as test domain
+	testDomain := targetHost
+	if targetPort != "" && targetPort != "80" && targetPort != "443" {
+		testDomain = fmt.Sprintf("%s:%s", targetHost, targetPort)
+	}
+
+	// Protocol Smuggling Test
+	if c.config.AdvancedChecks.TestProtocolSmuggling {
+		if c.debug {
+			result.DebugInfo += fmt.Sprintf("[DIRECT SCAN] Testing protocol smuggling\n")
+		}
+		if tester != nil {
+			res, err := tester.PerformInteractshTest(directClient, c, func(url string) (*http.Request, error) {
+				req, err := http.NewRequest("POST", fmt.Sprintf("http://%s", url), strings.NewReader("test"))
+				if err != nil {
+					return nil, err
+				}
+				req.Header.Add("Content-Length", "4")
+				req.Header.Add("Transfer-Encoding", "chunked")
+				return req, nil
+			})
+			if err == nil && res != nil && res.Success {
+				result.CheckResults = append(result.CheckResults, *res)
+				foundSomething = true
+			}
+		} else {
+			if res, err := c.checkProtocolSmuggling(directClient, testDomain); err == nil && res != nil && res.Success {
+				result.CheckResults = append(result.CheckResults, *res)
+				foundSomething = true
+			}
+		}
+	}
+
+	// DNS Rebinding Test
+	if c.config.AdvancedChecks.TestDNSRebinding {
+		if c.debug {
+			result.DebugInfo += fmt.Sprintf("[DIRECT SCAN] Testing DNS rebinding\n")
+		}
+		if tester != nil {
+			res, err := tester.PerformInteractshTest(directClient, c, func(url string) (*http.Request, error) {
+				req, err := http.NewRequest("GET", fmt.Sprintf("http://%s", url), nil)
+				if err != nil {
+					return nil, err
+				}
+				req.Header.Set("X-Forwarded-Host", url)
+				req.Header.Set("Host", url)
+				return req, nil
+			})
+			if err == nil && res != nil && res.Success {
+				result.CheckResults = append(result.CheckResults, *res)
+				foundSomething = true
+			}
+		} else {
+			if res, err := c.checkDNSRebinding(directClient, testDomain); err == nil && res != nil && res.Success {
+				result.CheckResults = append(result.CheckResults, *res)
+				foundSomething = true
+			}
+		}
+	}
+
+	// IPv6 Test
+	if c.config.AdvancedChecks.TestIPv6 {
+		if c.debug {
+			result.DebugInfo += fmt.Sprintf("[DIRECT SCAN] Testing IPv6 support\n")
+		}
+		if tester != nil {
+			res, err := tester.PerformInteractshTest(directClient, c, func(url string) (*http.Request, error) {
+				return http.NewRequest("GET", fmt.Sprintf("http://[%s]", url), nil)
+			})
+			if err == nil && res != nil && res.Success {
+				result.CheckResults = append(result.CheckResults, *res)
+				foundSomething = true
+			}
+		} else {
+			if res, err := c.checkIPv6Support(directClient, testDomain); err == nil && res != nil && res.Success {
+				result.CheckResults = append(result.CheckResults, *res)
+				foundSomething = true
+			}
+		}
+	}
+
+	// HTTP Methods Test
+	if len(c.config.AdvancedChecks.TestHTTPMethods) > 0 {
+		if c.debug {
+			result.DebugInfo += fmt.Sprintf("[DIRECT SCAN] Testing HTTP methods: %v\n", c.config.AdvancedChecks.TestHTTPMethods)
+		}
+		var results []*CheckResult
+		if tester != nil {
+			for _, method := range c.config.AdvancedChecks.TestHTTPMethods {
+				res, err := tester.PerformInteractshTest(directClient, c, func(url string) (*http.Request, error) {
+					return http.NewRequest(method, fmt.Sprintf("http://%s", url), nil)
+				})
+				if err == nil && res != nil && res.Success {
+					results = append(results, res)
+				}
+			}
+		} else {
+			results, _ = c.checkHTTPMethods(directClient, testDomain)
+		}
+		if len(results) > 0 {
+			for _, res := range results {
+				if res != nil && res.Success {
+					result.CheckResults = append(result.CheckResults, *res)
+					foundSomething = true
+				}
+			}
+		}
+	}
+
+	// Cache Poisoning Test
+	if c.config.AdvancedChecks.TestCachePoisoning {
+		if c.debug {
+			result.DebugInfo += fmt.Sprintf("[DIRECT SCAN] Testing cache poisoning\n")
+		}
+		if tester != nil {
+			res, err := tester.PerformInteractshTest(directClient, c, func(url string) (*http.Request, error) {
+				req, err := http.NewRequest("GET", fmt.Sprintf("http://%s", url), nil)
+				if err != nil {
+					return nil, err
+				}
+				req.Header.Set("Cache-Control", "public, max-age=31536000")
+				req.Header.Set("X-Cache-Control", "public, max-age=31536000")
+				return req, nil
+			})
+			if err == nil && res != nil && res.Success {
+				result.CheckResults = append(result.CheckResults, *res)
+				foundSomething = true
+			}
+		} else {
+			if res, err := c.checkCachePoisoning(directClient, testDomain); err == nil && res != nil && res.Success {
+				result.CheckResults = append(result.CheckResults, *res)
+				foundSomething = true
+			}
+		}
+	}
+
+	// Host Header Injection Test
+	if c.config.AdvancedChecks.TestHostHeaderInjection {
+		if c.debug {
+			result.DebugInfo += fmt.Sprintf("[DIRECT SCAN] Testing host header injection\n")
+		}
+		if tester != nil {
+			res, err := tester.PerformInteractshTest(directClient, c, func(url string) (*http.Request, error) {
+				req, err := http.NewRequest("GET", fmt.Sprintf("http://%s", url), nil)
+				if err != nil {
+					return nil, err
+				}
+				req.Host = url
+				req.Header.Set("X-Forwarded-Host", url)
+				req.Header.Set("X-Host", url)
+				req.Header.Set("X-Forwarded-Server", url)
+				req.Header.Set("X-HTTP-Host-Override", url)
+				return req, nil
+			})
+			if err == nil && res != nil && res.Success {
+				result.CheckResults = append(result.CheckResults, *res)
+				foundSomething = true
+			}
+		} else {
+			if res, err := c.checkHostHeaderInjection(directClient, testDomain); err == nil && res != nil && res.Success {
+				result.CheckResults = append(result.CheckResults, *res)
+				foundSomething = true
+			}
+		}
+	}
+
+	// SSRF Test (comprehensive check from advanced_checks.go)
+	if c.config.AdvancedChecks.TestSSRF {
+		if c.debug {
+			result.DebugInfo += fmt.Sprintf("[DIRECT SCAN] Running comprehensive SSRF checks\n")
+		}
+		if res, err := c.checkSSRF(directClient, testDomain); err == nil && res != nil && res.Success {
+			result.CheckResults = append(result.CheckResults, *res)
+			foundSomething = true
+		}
+	}
+
+	// Nginx Vulnerability Tests
+	if c.config.AdvancedChecks.TestNginxVulnerabilities {
+		if c.debug {
+			result.DebugInfo += "[DIRECT SCAN - NGINX VULNS] Running nginx-specific vulnerability checks\n"
+		}
+		nginxResults := c.performNginxVulnerabilityChecks(directClient, result)
+		result.NginxVulnerabilities = nginxResults
+
+		// Count findings
+		nginxFindings := 0
+		if nginxResults.OffBySlashVuln {
+			nginxFindings++
+		}
+		if nginxResults.K8sAPIExposed {
+			nginxFindings++
+		}
+		if nginxResults.IngressWebhookExposed {
+			nginxFindings++
+		}
+		if nginxResults.DebugEndpointsExposed {
+			nginxFindings++
+		}
+		if nginxResults.VulnerableAnnotations {
+			nginxFindings++
+		}
+
+		if nginxFindings > 0 {
+			foundSomething = true
+			if c.debug {
+				result.DebugInfo += fmt.Sprintf("[DIRECT SCAN - NGINX VULNS] Complete - Found %d vulnerabilities\n", nginxFindings)
+			}
+		}
+	}
+
+	// Apache Vulnerability Tests
+	if c.config.AdvancedChecks.TestApacheVulnerabilities {
+		if c.debug {
+			result.DebugInfo += "[DIRECT SCAN - APACHE VULNS] Running Apache mod_proxy vulnerability checks\n"
+		}
+		apacheResults := c.performApacheVulnerabilityChecks(directClient, result)
+		result.ApacheVulnerabilities = apacheResults
+
+		// Count findings
+		apacheFindings := 0
+		if apacheResults.CVE_2021_40438_SSRF {
+			apacheFindings++
+		}
+		if apacheResults.CVE_2020_11984_RCE {
+			apacheFindings++
+		}
+		if apacheResults.CVE_2021_41773_PathTraversal {
+			apacheFindings++
+		}
+		if apacheResults.CVE_2024_38473_ACLBypass {
+			apacheFindings++
+		}
+		if apacheResults.SSRFVulnerable {
+			apacheFindings++
+		}
+		if apacheResults.PathTraversalVuln {
+			apacheFindings++
+		}
+
+		if apacheFindings > 0 {
+			foundSomething = true
+			if c.debug {
+				result.DebugInfo += fmt.Sprintf("[DIRECT SCAN - APACHE VULNS] Complete - Found %d vulnerabilities\n", apacheFindings)
+			}
+		}
+	}
+
+	// Kong Vulnerability Tests
+	if c.config.AdvancedChecks.TestKongVulnerabilities {
+		if c.debug {
+			result.DebugInfo += "[DIRECT SCAN - KONG VULNS] Running Kong API Gateway vulnerability checks\n"
+		}
+		kongResults := c.performKongVulnerabilityChecks(directClient, result)
+		result.KongVulnerabilities = kongResults
+
+		// Count findings
+		kongFindings := 0
+		if kongResults.ManagerExposed {
+			kongFindings++
+		}
+		if kongResults.AdminAPIExposed {
+			kongFindings++
+		}
+		if kongResults.UnauthorizedAccess {
+			kongFindings++
+		}
+
+		if kongFindings > 0 {
+			foundSomething = true
+			if c.debug {
+				result.DebugInfo += fmt.Sprintf("[DIRECT SCAN - KONG VULNS] Complete - Found %d vulnerabilities\n", kongFindings)
+			}
+		}
+	}
+
+	// Generic Vulnerability Tests
+	if c.config.AdvancedChecks.TestGenericVulnerabilities {
+		if c.debug {
+			result.DebugInfo += "[DIRECT SCAN - GENERIC VULNS] Running generic proxy misconfiguration checks\n"
+		}
+		genericResults := c.performGenericVulnerabilityChecks(directClient, result)
+		result.GenericVulnerabilities = genericResults
+
+		// Count findings
+		genericFindings := 0
+		if genericResults.OpenProxyToLocalhost {
+			genericFindings++
+		}
+		if genericResults.XForwardedForBypass {
+			genericFindings++
+		}
+		if genericResults.CachePoisonVulnerable {
+			genericFindings++
+		}
+		if genericResults.LinkerdSSRF {
+			genericFindings++
+		}
+		if genericResults.SpringBootActuator {
+			genericFindings++
+		}
+
+		if genericFindings > 0 {
+			foundSomething = true
+			if c.debug {
+				result.DebugInfo += fmt.Sprintf("[DIRECT SCAN - GENERIC VULNS] Complete - Found %d vulnerabilities\n", genericFindings)
+			}
+		}
+	}
+
+	// Extended Vulnerability Tests
+	if c.config.AdvancedChecks.TestExtendedVulnerabilities {
+		if c.debug {
+			result.DebugInfo += "[DIRECT SCAN - EXTENDED VULNS] Running extended vulnerability checks\n"
+		}
+		extendedResults := c.performExtendedVulnerabilityChecks(directClient, result)
+		result.ExtendedVulnerabilities = extendedResults
+
+		// Count findings
+		extendedFindings := 0
+		if extendedResults.NginxVersionDetected {
+			extendedFindings++
+		}
+		if extendedResults.NginxConfigExposed {
+			extendedFindings++
+		}
+		if extendedResults.WebSocketAbuseVulnerable {
+			extendedFindings++
+		}
+		if extendedResults.HTTP2SmugglingVulnerable {
+			extendedFindings++
+		}
+		if extendedResults.ProxyAuthBypass {
+			extendedFindings++
+		}
+
+		if extendedFindings > 0 {
+			foundSomething = true
+			if c.debug {
+				result.DebugInfo += fmt.Sprintf("[DIRECT SCAN - EXTENDED VULNS] Complete - Found %d vulnerabilities\n", extendedFindings)
+			}
+		}
+	}
+
+	// Vendor-Specific Vulnerability Tests
+	if c.config.AdvancedChecks.TestVendorVulnerabilities {
+		if c.debug {
+			result.DebugInfo += "[DIRECT SCAN - VENDOR VULNS] Running vendor-specific vulnerability checks\n"
+		}
+		vendorResults := c.performVendorVulnerabilityChecks(directClient, result)
+		result.VendorVulnerabilities = vendorResults
+
+		// Count findings
+		vendorFindings := 0
+		if vendorResults.HAProxyStatsExposed || vendorResults.HAProxyCVE_2023_40225 {
+			vendorFindings++
+		}
+		if vendorResults.SquidCacheManagerExposed || vendorResults.SquidCVE_2021_46784 {
+			vendorFindings++
+		}
+		if vendorResults.TraefikDashboardExposed || vendorResults.TraefikAPIExposed {
+			vendorFindings++
+		}
+		if vendorResults.EnvoyAdminExposed || vendorResults.EnvoyCVE_2022_21654 {
+			vendorFindings++
+		}
+		if vendorResults.CaddyAdminAPIExposed {
+			vendorFindings++
+		}
+		if vendorResults.VarnishBanLurkExposed || vendorResults.VarnishCVE_2022_45060 {
+			vendorFindings++
+		}
+
+		if vendorFindings > 0 {
+			foundSomething = true
+			if c.debug {
+				result.DebugInfo += fmt.Sprintf("[DIRECT SCAN - VENDOR VULNS] Complete - Found %d vulnerabilities\n", vendorFindings)
+			}
+		}
+	}
+
+	// Advanced SSRF Vulnerability Tests (Parser Differentials, IP Obfuscation, etc.)
+	if c.config.AdvancedChecks.TestSSRF {
+		if c.debug {
+			result.DebugInfo += "[DIRECT SCAN - ADVANCED SSRF] Running advanced SSRF vulnerability checks\n"
+		}
+		advancedSSRFResults := c.performAdvancedSSRFChecks(directClient, result)
+		result.AdvancedSSRFVulnerabilities = advancedSSRFResults
+
+		// Count findings
+		advancedSSRFFindings := 0
+		if advancedSSRFResults.ParserDifferentialVuln {
+			advancedSSRFFindings++
+		}
+		if advancedSSRFResults.IPObfuscationBypass {
+			advancedSSRFFindings++
+		}
+		if advancedSSRFResults.RedirectChainVuln {
+			advancedSSRFFindings++
+		}
+		if advancedSSRFResults.ProtocolSmugglingVuln {
+			advancedSSRFFindings++
+		}
+		if advancedSSRFResults.HeaderInjectionSSRF {
+			advancedSSRFFindings++
+		}
+		if advancedSSRFResults.ProxyPassTraversalVuln {
+			advancedSSRFFindings++
+		}
+		if advancedSSRFResults.HostHeaderSSRF {
+			advancedSSRFFindings++
+		}
+
+		if advancedSSRFFindings > 0 {
+			foundSomething = true
+			if c.debug {
+				result.DebugInfo += fmt.Sprintf("[DIRECT SCAN - ADVANCED SSRF] Complete - Found %d vulnerabilities\n", advancedSSRFFindings)
+			}
+		}
+	}
+
+	// Summary of what was tested (ALWAYS log this, not just in debug mode)
+	totalChecks := 0
+	totalRequests := 0
+	checksRun := []string{}
+
+	if c.config.AdvancedChecks.TestProtocolSmuggling {
+		totalChecks++
+		totalRequests += 3
+		checksRun = append(checksRun, "Protocol Smuggling")
+	}
+	if c.config.AdvancedChecks.TestDNSRebinding {
+		totalChecks++
+		totalRequests += 2
+		checksRun = append(checksRun, "DNS Rebinding")
+	}
+	if c.config.AdvancedChecks.TestIPv6 {
+		totalChecks++
+		totalRequests += 2
+		checksRun = append(checksRun, "IPv6 Support")
+	}
+	if len(c.config.AdvancedChecks.TestHTTPMethods) > 0 {
+		totalChecks++
+		totalRequests += len(c.config.AdvancedChecks.TestHTTPMethods)
+		checksRun = append(checksRun, fmt.Sprintf("HTTP Methods (%d)", len(c.config.AdvancedChecks.TestHTTPMethods)))
+	}
+	if c.config.AdvancedChecks.TestCachePoisoning {
+		totalChecks++
+		totalRequests += 3
+		checksRun = append(checksRun, "Cache Poisoning")
+	}
+	if c.config.AdvancedChecks.TestHostHeaderInjection {
+		totalChecks++
+		totalRequests += 5
+		checksRun = append(checksRun, "Host Header Injection")
+	}
+	if c.config.AdvancedChecks.TestSSRF {
+		totalChecks++
+		totalRequests += 4
+		checksRun = append(checksRun, "SSRF (Basic)")
+
+		// Count advanced SSRF subchecks that ran
+		if result.AdvancedSSRFVulnerabilities != nil {
+			checksRun = append(checksRun, "  └─ Advanced SSRF: Parser Differentials (13 patterns)")
+			totalRequests += 13
+
+			checksRun = append(checksRun, "  └─ Advanced SSRF: IP Obfuscation (15 formats)")
+			totalRequests += 15
+
+			checksRun = append(checksRun, "  └─ Advanced SSRF: Redirect Chains (3 scenarios)")
+			totalRequests += 3
+
+			checksRun = append(checksRun, "  └─ Advanced SSRF: Protocol Smuggling (9 schemes)")
+			totalRequests += 9
+
+			checksRun = append(checksRun, "  └─ Advanced SSRF: Header Injection (40 tests)")
+			totalRequests += 40
+
+			checksRun = append(checksRun, "  └─ Advanced SSRF: proxy_pass Traversal (7 patterns)")
+			totalRequests += 7
+
+			checksRun = append(checksRun, "  └─ Advanced SSRF: Host Header (5 targets)")
+			totalRequests += 5
+
+			// Priority 2 Advanced Checks
+			checksRun = append(checksRun, "  └─ Advanced SSRF: SNI Proxy (5 targets)")
+			totalRequests += 5
+
+			checksRun = append(checksRun, "  └─ Advanced SSRF: DNS Rebinding (3 services)")
+			totalRequests += 6 // 2 requests per service
+
+			checksRun = append(checksRun, "  └─ Advanced SSRF: HTTP/2 Header Injection (4 patterns)")
+			totalRequests += 4
+
+			checksRun = append(checksRun, "  └─ Advanced SSRF: AWS IMDSv2 Bypass (7 tests)")
+			totalRequests += 7
+
+			// Priority 3 Advanced Checks
+			checksRun = append(checksRun, "  └─ Advanced SSRF: URL Encoding Bypass (12 patterns)")
+			totalRequests += 12
+
+			checksRun = append(checksRun, "  └─ Advanced SSRF: Multiple Host Headers (5 combinations)")
+			totalRequests += 5
+
+			checksRun = append(checksRun, "  └─ Advanced SSRF: Cloud-Specific Headers (5 providers)")
+			totalRequests += 5
+
+			checksRun = append(checksRun, "  └─ Advanced SSRF: Port Specification Tricks (8 patterns)")
+			totalRequests += 8
+
+			checksRun = append(checksRun, "  └─ Advanced SSRF: Fragment/Query Manipulation (10 patterns)")
+			totalRequests += 10
+
+			totalChecks += 16 // 7 Priority 1 + 4 Priority 2 + 5 Priority 3
+		}
+	}
+	if c.config.AdvancedChecks.TestNginxVulnerabilities {
+		totalChecks++
+		totalRequests += 25
+		checksRun = append(checksRun, "Nginx Vulnerabilities (CVEs + misconfigs)")
+	}
+	if c.config.AdvancedChecks.TestApacheVulnerabilities {
+		totalChecks++
+		totalRequests += 20
+		checksRun = append(checksRun, "Apache Vulnerabilities (CVEs + mod_proxy)")
+	}
+	if c.config.AdvancedChecks.TestKongVulnerabilities {
+		totalChecks++
+		totalRequests += 12
+		checksRun = append(checksRun, "Kong API Gateway Vulnerabilities")
+	}
+	if c.config.AdvancedChecks.TestGenericVulnerabilities {
+		totalChecks++
+		totalRequests += 18
+		checksRun = append(checksRun, "Generic Proxy Misconfigurations")
+	}
+	if c.config.AdvancedChecks.TestExtendedVulnerabilities {
+		totalChecks++
+		totalRequests += 15
+		checksRun = append(checksRun, "Extended Vulnerabilities (HTTP/2, WebSocket)")
+	}
+	if c.config.AdvancedChecks.TestVendorVulnerabilities {
+		totalChecks++
+		totalRequests += 25
+		checksRun = append(checksRun, "Vendor Vulnerabilities (HAProxy, Squid, Traefik, etc.)")
+	}
+
+	// ALWAYS log the summary (not just in debug mode)
+	if c.logger != nil {
+		c.logger.Info("╔════════════════════════════════════════════════════════════════╗")
+		c.logger.Info("║              DIRECT SCAN TEST SUMMARY                          ║")
+		c.logger.Info("╠════════════════════════════════════════════════════════════════╣")
+		c.logger.Info(fmt.Sprintf("║ Total Check Categories: %-39d ║", totalChecks))
+		c.logger.Info(fmt.Sprintf("║ Total HTTP Requests:    %-39d ║", totalRequests))
+		c.logger.Info("╠════════════════════════════════════════════════════════════════╣")
+		c.logger.Info("║ Checks Performed:                                              ║")
+		for _, check := range checksRun {
+			// Pad the check name to fit in the box
+			checkLine := fmt.Sprintf("║   • %-58s ║", check)
+			c.logger.Info(checkLine)
+		}
+		c.logger.Info("╚════════════════════════════════════════════════════════════════╝")
+
+		if foundSomething {
+			c.logger.Info("[DIRECT SCAN] ✓ VULNERABILITIES DETECTED via direct scanning")
+		} else {
+			c.logger.Info("[DIRECT SCAN] ✓ No vulnerabilities detected (target appears well-configured)")
+		}
+	}
+
+	return foundSomething
+}
+
+// hasSSRFChecks returns true if SSRF checks are enabled
+func (c *Checker) hasSSRFChecks() bool {
+	return c.config.AdvancedChecks.TestProtocolSmuggling ||
+		c.config.AdvancedChecks.TestDNSRebinding ||
+		c.config.AdvancedChecks.TestCachePoisoning ||
+		c.config.AdvancedChecks.TestHostHeaderInjection
 }

@@ -66,7 +66,7 @@ func TestIsRetryableError(t *testing.T) {
 		},
 	}
 	
-	checker := NewChecker(config, false)
+	checker := NewChecker(config, false, nil)
 
 	tests := []struct {
 		name     string
@@ -140,7 +140,7 @@ func TestCalculateBackoffDelay(t *testing.T) {
 		BackoffFactor: 2.0,
 	}
 	
-	checker := NewChecker(config, false)
+	checker := NewChecker(config, false, nil)
 
 	tests := []struct {
 		name     string
@@ -263,7 +263,7 @@ func TestExecuteWithRetry(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			checker := NewChecker(tt.config, true) // Enable debug for better test coverage
+			checker := NewChecker(tt.config, true, nil) // Enable debug for better test coverage
 			result := &ProxyResult{DebugInfo: ""}
 			
 			callCount := 0
@@ -340,7 +340,7 @@ func TestMakeRequestWithRetry(t *testing.T) {
 		},
 	}
 
-	checker := NewChecker(config, true)
+	checker := NewChecker(config, true, nil)
 	result := &ProxyResult{DebugInfo: ""}
 	client := &http.Client{Timeout: config.Timeout}
 
@@ -447,7 +447,7 @@ func TestValidateRetryConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			checker := NewChecker(tt.config, false)
+			checker := NewChecker(tt.config, false, nil)
 
 			if checker.config.MaxRetries != tt.expectedMaxRetries {
 				t.Errorf("Expected MaxRetries %d, got %d", 
@@ -487,7 +487,7 @@ func TestRetryTimeout(t *testing.T) {
 		RetryableErrors: []string{"test error"},
 	}
 
-	checker := NewChecker(config, false)
+	checker := NewChecker(config, false, nil)
 	result := &ProxyResult{}
 
 	callCount := 0
@@ -533,7 +533,7 @@ func BenchmarkCalculateBackoffDelay(b *testing.B) {
 		BackoffFactor: 2.0,
 	}
 	
-	checker := NewChecker(config, false)
+	checker := NewChecker(config, false, nil)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -550,7 +550,7 @@ func BenchmarkIsRetryableError(b *testing.B) {
 		},
 	}
 	
-	checker := NewChecker(config, false)
+	checker := NewChecker(config, false, nil)
 	testError := errors.New("connection refused")
 
 	b.ResetTimer()

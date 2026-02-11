@@ -89,7 +89,7 @@ func TestHasAdvancedChecks(t *testing.T) {
 				AdvancedChecks: tt.advancedChecks,
 			}
 
-			checker := NewChecker(config, false)
+			checker := NewChecker(config, false, nil)
 			result := checker.hasAdvancedChecks()
 
 			if result != tt.expected {
@@ -132,7 +132,7 @@ func TestPerformAdvancedChecks(t *testing.T) {
 		InteractshURL: "https://interact.sh", // Use example URL for testing
 	}
 
-	checker := NewChecker(config, true) // Enable debug for better test coverage
+	checker := NewChecker(config, true, nil) // Enable debug for better test coverage
 	client := &http.Client{Timeout: config.Timeout}
 	result := &ProxyResult{
 		AdvancedChecksDetails: make(map[string]interface{}),
@@ -167,7 +167,7 @@ func TestAdvancedChecksWithRealDomains(t *testing.T) {
 		},
 	}
 
-	checker := NewChecker(config, true)
+	checker := NewChecker(config, true, nil)
 	client := &http.Client{Timeout: config.Timeout}
 	result := &ProxyResult{
 		AdvancedChecksDetails: make(map[string]interface{}),
@@ -214,7 +214,7 @@ func TestSSRFDetection(t *testing.T) {
 		},
 	}
 
-	checker := NewChecker(config, false)
+	checker := NewChecker(config, false, nil)
 	client := &http.Client{Timeout: config.Timeout}
 
 	// Test SSRF check method directly
@@ -257,7 +257,7 @@ func TestHostHeaderInjection(t *testing.T) {
 		},
 	}
 
-	checker := NewChecker(config, false)
+	checker := NewChecker(config, false, nil)
 	client := &http.Client{Timeout: config.Timeout}
 
 	// Test host header injection check
@@ -282,7 +282,7 @@ func TestProtocolSmuggling(t *testing.T) {
 		},
 	}
 
-	checker := NewChecker(config, false)
+	checker := NewChecker(config, false, nil)
 	client := &http.Client{Timeout: config.Timeout}
 
 	// Test protocol smuggling check
@@ -307,7 +307,7 @@ func TestDNSRebinding(t *testing.T) {
 		},
 	}
 
-	checker := NewChecker(config, false)
+	checker := NewChecker(config, false, nil)
 	client := &http.Client{Timeout: config.Timeout}
 
 	// Test DNS rebinding check
@@ -332,7 +332,7 @@ func TestIPv6Support(t *testing.T) {
 		},
 	}
 
-	checker := NewChecker(config, false)
+	checker := NewChecker(config, false, nil)
 	client := &http.Client{Timeout: config.Timeout}
 
 	// Test IPv6 support check
@@ -357,7 +357,7 @@ func TestHTTPMethods(t *testing.T) {
 		},
 	}
 
-	checker := NewChecker(config, false)
+	checker := NewChecker(config, false, nil)
 	client := &http.Client{Timeout: config.Timeout}
 
 	// Test HTTP methods check
@@ -382,7 +382,7 @@ func TestCachePoisoning(t *testing.T) {
 		},
 	}
 
-	checker := NewChecker(config, false)
+	checker := NewChecker(config, false, nil)
 	client := &http.Client{Timeout: config.Timeout}
 
 	// Test cache poisoning check
@@ -411,7 +411,7 @@ func TestAdvancedChecksIntegration(t *testing.T) {
 		InteractshURL: "https://interact.sh",
 	}
 
-	checker := NewChecker(config, true)
+	checker := NewChecker(config, true, nil)
 
 	// Test with a non-existent proxy
 	result := checker.Check("http://non-existent-proxy.example.com:8080")
@@ -476,7 +476,7 @@ func TestAdvancedChecksConfigurationAlternate(t *testing.T) {
 				AdvancedChecks: tt.advancedChecks,
 			}
 
-			checker := NewChecker(config, false)
+			checker := NewChecker(config, false, nil)
 			hasChecks := checker.hasAdvancedChecks()
 
 			if hasChecks != tt.expectHas {
@@ -497,7 +497,7 @@ func BenchmarkHasAdvancedChecks(b *testing.B) {
 		},
 	}
 
-	checker := NewChecker(config, false)
+	checker := NewChecker(config, false, nil)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -520,7 +520,7 @@ func BenchmarkAdvancedChecksSetup(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		checker := NewChecker(config, false)
+		checker := NewChecker(config, false, nil)
 		client := &http.Client{Timeout: config.Timeout}
 		result := &ProxyResult{
 			AdvancedChecksDetails: make(map[string]interface{}),

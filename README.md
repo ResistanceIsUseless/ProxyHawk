@@ -1,759 +1,212 @@
 # ProxyHawk
-[proxyhawk.jpg]
+
 A comprehensive proxy checker and validator with **advanced security testing** capabilities for HTTP, HTTPS, SOCKS4, and SOCKS5 proxies.
 
-## 🚀 Major Updates
-- ✅ **Production-ready** with comprehensive security testing
-- 🆕 **Path-Based Fingerprinting** - New mode for testing reverse proxies, API gateways, and Kubernetes Ingress
-- ✅ **Proxy Fingerprinting** - Identify 12+ proxy types (nginx, apache, haproxy, kong, cloudflare, etc.)
-- ✅ **Vulnerability Scanning** - 55 vulnerability checks including 6 critical CVEs (CVSS 9.0+)
-- ✅ **Three-Tier Check Modes** - Choose between basic, intense, or vulns scanning modes
-- ✅ **Enhanced Anonymity Detection** - Elite/Anonymous/Transparent/Compromised classification with 10+ header checks
-- ✅ **Proxy Chain Detection** - Automatic detection of proxy-behind-proxy configurations
-- ✅ **Enhanced security testing** - SSRF (60+ targets), Host header injection, protocol smuggling detection
-- ✅ **Critical CVE Detection** - CVE-2025-1974 (CVSS 9.8), CVE-2021-40438 (CVSS 9.0), CVE-2020-11984 (CVSS 9.8)
-- ✅ **Structured logging** and error handling
-- ✅ **Modular architecture** with comprehensive test coverage
-
-## Installation
-
-### From Source
-```bash
-git clone https://github.com/ResistanceIsUseless/ProxyHawk.git
-cd ProxyHawk
-make build  # Builds both proxyhawk and proxyhawk-server in ./build/
-```
-
-### Using Go Install
-```bash
-go install github.com/ResistanceIsUseless/ProxyHawk/cmd/proxyhawk@latest
-```
-
-### Docker (Recommended for Production)
-```bash
-# Quick start with Docker
-cd deployments/docker
-docker-compose up -d
-
-# Access services:
-# - ProxyHawk API: http://localhost:8888/api/health
-# - Prometheus: http://localhost:9090  
-# - Grafana: http://localhost:3000 (admin/admin)
-```
-
-### Using Makefile
-```bash
-# Development workflow
-make deps          # Install dependencies
-make build         # Build binary
-make test          # Run tests
-make docker-build  # Build Docker image
-make docker-run    # Run in container
-```
+[![Go Version](https://img.shields.io/badge/Go-1.23%2B-blue.svg)](https://golang.org)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 ## Features
 
-### Core Proxy Testing
-- Concurrent proxy checking using goroutines with configurable concurrency
-- Support for HTTP, HTTPS, HTTP/2, HTTP/3, SOCKS4, and SOCKS5 proxies
-- Automatic proxy type detection and validation
-- HTTP/2 and HTTP/3 protocol support with automatic detection
-- Detailed timing and performance metrics
-- Multiple output formats (text, JSON, working proxies only)
+- **Multi-Protocol Support**: HTTP, HTTPS, HTTP/2, HTTP/3, SOCKS4, SOCKS5
+- **Advanced SSRF Detection**: 16 advanced checks with 154 test cases covering all known attack vectors
+- **Vulnerability Scanning**: 55+ CVE checks including 6 critical vulnerabilities (CVSS 9.0+)
+- **Proxy Discovery**: Shodan, Censys, free lists, web scraping with honeypot filtering
+- **Path-Based Fingerprinting**: Reverse proxy and API gateway detection
+- **Anonymity Detection**: Elite/Anonymous/Transparent classification with 10+ header checks
+- **Three Check Modes**: Basic (fast), Intense (security), Vulns (comprehensive)
 
-### Proxy Discovery & Intelligence
-- **Multiple Discovery Sources**: Discover proxies from various sources
-  - **Shodan Integration**: Professional internet scanning database
-  - **Censys Integration**: Comprehensive internet-wide asset discovery
-  - **Free Proxy Lists**: Aggregated from ProxyList.geonode.com, FreeProxy.world
-  - **Web Scraping**: Real-time scraping from public proxy sources
-- **Smart Filtering**: Filter by country, confidence score, proxy type, and more
-- **Intelligent Scoring**: Advanced scoring system based on multiple factors
-- **Auto-Validation**: Automatically test discovered candidates
-- **Deduplication**: Remove duplicate candidates across sources
-- **Preset Queries**: Built-in search queries optimized for each source
-- **🛡️ Honeypot Detection**: Advanced filtering to identify and remove honeypots/monitoring systems
+## Quick Start
 
-### Security Testing & Validation
-- **Three-Tier Check Modes**: Choose between basic (connectivity only), intense (core security checks), or vulns (full vulnerability scanning with 20+ CVE checks)
-- **Proxy Fingerprinting**: Identify proxy software/vendor (nginx, apache, haproxy, varnish, traefik, envoy, caddy, cloudflare, fastly, AWS, kong, squid) using header analysis, error page patterns, and behavioral testing
-- **Path-Based Fingerprinting**: New direct scanning mode for reverse proxies and API gateways
-  - Tests multiple endpoints (/, /admin, /api, /v1, /health, /status, /metrics, etc.)
-  - Detects backend routing patterns and rewrite configurations
-  - Identifies proxy software from error pages when Server header is hidden
-  - Compares headers across paths to detect multi-backend routing
-  - Detects backend frameworks (Django, Flask, Spring, Rails, etc.)
-  - Works with Kubernetes Ingress, API Gateways, and reverse proxies
-- **Advanced Anonymity Detection**: Classification of proxies into Elite, Anonymous, Transparent, or Compromised levels based on 10+ header checks
-- **Proxy Chain Detection**: Automatic detection of proxy-behind-proxy configurations via Via header and X-Forwarded-For analysis
-- **SSRF Detection**: Tests access to cloud metadata services (AWS, GCP, Azure), internal networks (RFC 1918, RFC 6598, RFC 3927), and localhost variants (60+ test targets)
-- **Host Header Injection**: Advanced testing with multiple injection vectors including X-Forwarded-Host, X-Real-IP, malformed headers, and HTTP/1.0 bypasses
-- **Protocol Smuggling**: Detection of HTTP request smuggling vulnerabilities using Content-Length/Transfer-Encoding conflicts
-- **Internal Network Scanning**: Port scanning capabilities and DNS rebinding protection testing
-- **Input Validation**: Comprehensive URL validation with security hardening against malicious inputs
+### Installation
 
-### Vulnerability Scanning (20+ CVE Checks)
-**Nginx Ingress/Proxy Vulnerabilities:**
-- **Off-by-Slash Path Traversal**: Tests for alias directive misconfiguration exposing sensitive files (.git/config, .env, /etc/passwd)
-- **Kubernetes API Exposure**: Detects K8s API access via X-Original-URL/X-Rewrite-URL header manipulation
-- **CVE-2025-1974** (Critical, CVSS 9.8): Nginx ingress admission controller RCE vulnerability
-- **Config Injection**: Tests for CVE-2025-24513/24514/1097/1098 annotation-based attacks
-- **Debug Endpoint Exposure**: Checks for pprof, metrics, and status pages
-
-**Apache mod_proxy Vulnerabilities:**
-- **CVE-2021-40438** (Critical, CVSS 9.0): mod_proxy SSRF via unix socket notation (docker.sock, snapd.socket)
-- **CVE-2020-11984** (Critical, CVSS 9.8): mod_proxy_uwsgi buffer overflow RCE
-- **CVE-2021-41773** (High, CVSS 7.5): Path traversal and RCE in Apache 2.4.49
-- **CVE-2024-38473** (High, CVSS 8.1): ACL bypass via path normalization
-- **Generic SSRF**: Tests AWS/GCP metadata, Redis, localhost access
-- **Path Traversal**: 8+ Apache-specific traversal patterns
-
-**Kong API Gateway Vulnerabilities:**
-- **Kong Manager Exposure**: Detects exposed Kong Manager and Konga dashboards
-- **Admin API Exposure**: Tests 9 endpoints (/routes, /services, /consumers, /plugins, etc.)
-- **Routes Enumeration**: Exposes all configured routes and their configurations
-- **Services Enumeration**: Lists all backend services
-- **Consumers Enumeration** (Critical): Indicates complete authentication bypass
-
-**Generic Proxy Misconfigurations:**
-- **Open Proxy to Localhost**: Tests access to internal services (SSH, MySQL, PostgreSQL, Redis, Elasticsearch, MongoDB) on 20+ localhost/IPv6 variations
-- **X-Forwarded-For ACL Bypass**: Tests 15+ protected paths with trusted IP spoofing for ACL evasion
-- **CVE-2022-46169** (Critical, CVSS 9.8): Cacti RCE via X-Forwarded-For authentication bypass
-- **Web Cache Poisoning**: Tests 7+ unkeyed headers (X-Forwarded-Host, X-Original-URL, X-Rewrite-URL) for cache poisoning vulnerabilities
-- **Linkerd SSRF**: Tests l5d-dtab header manipulation for internal service access (SSH, MySQL, Redis, metadata services)
-- **Spring Boot Actuator Exposure**: Detects 16+ exposed management endpoints (/env, /heapdump, /jolokia, /shutdown, /gateway/routes)
-
-**Extended Vulnerability Checks (Priority 3):**
-- **Nginx Version Fingerprinting**: Precise version detection via Server header, error pages, and behavior analysis
-- **Nginx Config Exposure**: Tests 12+ paths for exposed nginx.conf and configuration files
-- **Nginx Proxy Cache Bypass**: Cache key manipulation via unkeyed headers and query string
-- **Nginx Subrequest Auth Bypass**: auth_request module bypass via X-Original-URI and X-Accel-Redirect
-- **HTTP/2 Request Smuggling**: 4 vectors (CL-TE downgrade, pseudo-header injection, CRLF via binary headers, connection coalescing)
-- **WebSocket Abuse**: 4 checks (origin bypass, Content-Length smuggling, malformed upgrade, CSWSH null origin)
-- **Proxy Authentication Bypass**: 5 methods (empty auth, malformed Basic, SQL injection, multiple headers, Proxy-Connection bypass)
-- **Apache Server-Status Exposure**: Tests 6+ paths for exposed server-status pages
-- **CGI Script Exposure**: Detects 12+ exposed CGI scripts and directories
-- **Apache CVE-2019-10092**: XSS in mod_proxy error page via FTP URI
-- **Apache mod_rewrite SSRF**: RewriteRule-based SSRF to internal services
-- **Apache htaccess Override**: .htaccess file exposure and directory access control bypass
-
-**Vendor-Specific Vulnerability Checks (Priority 4):**
-- **HAProxy**: Statistics page exposure (6 paths), CVE-2023-40225 (request smuggling), CVE-2021-40346 (integer overflow), version detection
-- **Squid**: Cache manager exposure (10 endpoints), CVE-2021-46784 (buffer overflow), CVE-2020-15810 (request smuggling), version detection
-- **Traefik**: Dashboard exposure (4 paths), API endpoint exposure (8 endpoints), CVE-2024-45410 (SSRF via middleware), version detection
-- **Envoy**: Admin interface exposure (5 endpoints), CVE-2022-21654 (SSRF in original_dst), version detection
-- **Caddy**: Admin API exposure (4 endpoints), configuration disclosure, version detection
-- **Varnish**: BAN method exposure (cache poisoning), CVE-2022-45060 (request smuggling), version detection
-- **F5 BIG-IP**: iControl REST API exposure (6 endpoints), TMUI login page, version detection via /mgmt/tm/sys/version
-- **Nginx Plus**: Plus API exposure (9 endpoints), Dashboard exposure, version detection, commercial features detection
-- **Cloud-Specific**: AWS ALB header injection, Cloudflare Worker bypass, Cloudflare cache poisoning
-
-
-
-
-### Advanced Features
-- **Enhanced Anonymity Detection**: Elite/Anonymous/Transparent/Compromised classification with IP leak detection
-- **Proxy Chain Detection**: Detection of proxy-behind-proxy configurations with detailed chain information
-- **Header Leak Analysis**: Detection of 10+ header types that may leak real IP (X-Forwarded-For, Via, X-Real-IP, etc.)
-- Cloud provider detection and classification
-- Custom HTTP headers and User-Agent support
-- Rate limiting with per-host or global controls
-- Reverse DNS (rDNS) lookup for host headers
-- Structured logging with multiple verbosity levels
-- Graceful shutdown with signal handling
-- Configurable timeouts and validation rules
-
-## Configuration
-
-The application uses a YAML configuration file (default: `config.yaml`) to define cloud provider settings and validation rules. The configuration includes:
-
-- Cloud provider definitions and metadata service endpoints
-- Default HTTP headers and User-Agent settings
-- Response validation rules and content matching
-- Advanced security check configurations (SSRF, host header injection, protocol smuggling)  
-- Internal network ranges and reserved IP blocks
-- Rate limiting and timeout settings
-- Proxy discovery API credentials and filtering options
-
-Example configuration:
-```yaml
-cloud_providers:
-  - name: AWS
-    metadata_ips:
-      - "169.254.169.254"
-    internal_ranges:
-      - "172.31.0.0/16"
-      - "10.0.0.0/16"
-    asns:
-      - "16509"
-      - "14618"
-    org_names:
-      - "AMAZON"
-      - "AWS"
-
-# Discovery configuration
-discovery:
-  # API credentials for discovery sources
-  shodan_api_key: "YOUR_SHODAN_API_KEY"
-  censys_api_key: "YOUR_CENSYS_API_KEY"
-  censys_secret: "YOUR_CENSYS_SECRET"
-  
-  # Search parameters
-  max_results: 1000
-  countries: ["US", "GB", "DE", "NL"]
-  min_confidence: 0.3
-  timeout: 30
-  rate_limit: 60  # requests per minute
-  
-  # Filtering options
-  exclude_residential: true
-  exclude_cdn: true
-  exclude_malicious: true
-  deduplicate: true
-  
-  # Security options
-  enable_honeypot_filter: true  # Enable honeypot detection
-  honeypot_threshold: 0.4       # Suspicion threshold
-```
-
-You can specify a custom configuration file using the `-config` flag.
-
-## Usage
-
-1. Create a text file containing your proxy list, one proxy per line. The format should be:
-```
-http://proxy1.example.com:8080
-proxy2.example.com:3128
-https://proxy3.example.com:8443
-socks5://proxy4.example.com:1080
-```
-
-Note: The scheme (http://, https://, socks5://) is optional. If not provided, http:// will be used by default.
-
-2. Run the proxy checker:
 ```bash
+# From source
+git clone https://github.com/ResistanceIsUseless/ProxyHawk.git
+cd ProxyHawk
+make build
+
+# Using Go
+go install github.com/ResistanceIsUseless/ProxyHawk/cmd/proxyhawk@latest
+
+# Docker
+docker-compose up -d
+```
+
+### Basic Usage
+
+```bash
+# Test proxy list
 ./proxyhawk -l proxies.txt
-```
 
-### Command Line Options
-```
-Core Options:
-- -l: File containing proxy list (one per line)
-- -host: Single proxy host (IP, hostname, or IP:PORT) to test
-- -cidr: CIDR range to test (e.g., 192.168.1.0/24 or 192.168.1.0/24:8080)
-- -config: Path to configuration file (default: config/default.yaml)
-- -c: Number of concurrent checks (overrides config)
-- -t: Timeout in seconds (overrides config)
-- -v: Enable verbose output
-- -d: Enable debug mode (shows detailed request/response information)
-- -hot-reload: Enable configuration hot-reloading (watches config file for changes)
-
-Security Testing:
-- -mode: Check mode: basic (connectivity only), intense (advanced security checks), vulns (vulnerability scanning with 20+ CVE checks) (default: basic)
-- -advanced: Enable all advanced security checks (overrides -mode setting)
-- -interactsh: Enable Interactsh for out-of-band detection (enhances security checks with external callback verification)
-- -fingerprint: Enable proxy fingerprinting to identify proxy software/vendor (nginx, apache, kong, etc.)
-- -path-fingerprint: Enable path-based fingerprinting mode for reverse proxies and API gateways
-- -paths: Comma-separated list of custom paths to test (use with -path-fingerprint)
-- -r: Use reverse DNS lookup for host headers
-- Advanced security tests are configured via the YAML config file:
-  * SSRF testing against internal networks and cloud metadata (60+ targets)
-  * Host header injection with multiple attack vectors
-  * Protocol smuggling detection
-  * DNS rebinding protection testing
-  * Enhanced anonymity detection with 10+ header checks
-  * Proxy chain detection via Via and X-Forwarded-For analysis
-  * Nginx vulnerability scanning (5 checks including CVE-2025-1974)
-  * Apache mod_proxy vulnerability scanning (6 checks including CVE-2021-40438, CVE-2020-11984)
-  * Kong API Gateway vulnerability scanning (5 checks for exposed admin APIs)
-  * Generic proxy misconfigurations (10 checks: open proxy, X-Forwarded-For bypass, CVE-2022-46169, cache poisoning, Linkerd SSRF, Spring Boot Actuator)
-  * Extended vulnerability checks (7 checks: nginx version/config, HTTP/2 smuggling, WebSocket abuse, proxy auth bypass, Apache status/CGI)
-
-Output Options:
-- -o: Output results to text file (includes all details and summary)
-- -j: Output results to JSON file (structured format for programmatic use)
-- -wp: Output only working proxies to a text file (format: proxy - speed)
-- -wpa: Output only working anonymous proxies to a text file (format: proxy - speed)
-- -no-ui: Disable terminal UI (for automation/scripting)
-
-Progress Options (for -no-ui mode):
-- -progress: Progress indicator type (bar, spinner, dots, percent, basic, none) (default: bar)
-- -progress-width: Width of progress bar (default: 50)
-- -progress-no-color: Disable colored progress output
-
-Rate Limiting:
-- -rate-limit: Enable rate limiting to prevent overwhelming target servers
-- -rate-delay: Delay between requests (e.g. 500ms, 1s, 2s) (default: 1s)
-- -rate-per-host: Apply rate limiting per host instead of globally (default: true)
-- -rate-per-proxy: Apply rate limiting per individual proxy (takes precedence over per-host)
-
-Metrics:
-- -metrics: Enable Prometheus metrics endpoint
-- -metrics-addr: Address to serve metrics on (default: :9090)
-- -metrics-path: Path for metrics endpoint (default: /metrics)
-
-Protocol Support:
-- -http2: Enable HTTP/2 protocol detection and support
-- -http3: Enable HTTP/3 protocol detection and support (experimental)
-
-Discovery Options:
-- -discover: Enable discovery mode to find proxy candidates
-- -discover-source: Discovery source to use (shodan, censys, freelists, webscraper, all) (default: all)
-- -discover-query: Custom discovery query (uses preset if empty)
-- -discover-limit: Maximum number of candidates to discover (default: 100)
-- -discover-validate: Validate discovered candidates immediately
-- -discover-countries: Comma-separated list of country codes to target
-- -discover-min-confidence: Minimum confidence score for candidates (0.0-1.0, default: 0.0)
-- -discover-no-honeypot-filter: Disable honeypot detection and filtering
-
-Help Options:
-- -help, -h: Show help message
-- -version: Show version information
-- -quickstart: Show quick start guide with examples
-```
-### Example Commands
-
-Basic check against default URL (connectivity only):
-```bash
-./proxyhawk -l proxies.txt
-```
-
-Test a single proxy host:
-```bash
+# Test single proxy
 ./proxyhawk -host 192.168.1.100:8080
-./proxyhawk -host proxy.example.com:3128
-```
 
-Test a CIDR range:
-```bash
-./proxyhawk -cidr 192.168.1.0/24:8080
-./proxyhawk -cidr 10.0.0.0/24  # Tests common proxy ports on each IP
-```
-
-Check with increased concurrency and longer timeout:
-```bash
-./proxyhawk -l proxies.txt -c 20 -t 15s
-```
-
-Enable intense mode with core security checks:
-```bash
-./proxyhawk -l proxies.txt -mode intense
-```
-
-Enable full vulnerability scanning mode (55 vulnerability checks including 6 critical CVEs):
-```bash
+# Full security scan
 ./proxyhawk -l proxies.txt -mode vulns -d
-```
 
-Enable proxy fingerprinting:
-```bash
-./proxyhawk -l proxies.txt -fingerprint -v
-```
-
-Comprehensive scan with fingerprinting and vulnerability checks:
-```bash
-./proxyhawk -l proxies.txt -mode vulns -fingerprint -interactsh -d
-```
-
-Enable all advanced checks (overrides mode):
-```bash
-./proxyhawk -l proxies.txt -advanced -d
-```
-
-Enable comprehensive security testing with debug output:
-```bash
-./proxyhawk -l proxies.txt -d -config security_config.yaml
-```
-
-Save results to text and JSON files:
-```bash
-./proxyhawk -l proxies.txt -o results.txt -j results.json
-```
-
-Test with custom security configuration:
-```bash
-./proxyhawk -l proxies.txt -config custom_config.yaml -d -t 20s
-```
-
-Run without UI for automation:
-```bash
-./proxyhawk -l proxies.txt -no-ui -v -o results.txt
-```
-
-Maximum performance testing:
-```bash
-./proxyhawk -l proxies.txt -c 50 -t 5s
-```
-
-Debug mode with specific URL and timeout:
-```bash
-./proxyhawk -l proxies.txt -d -t 30s
-```
-
-Advanced security testing with custom output files:
-```bash
-./proxyhawk -l proxies.txt -d -o security_results.txt -j security_results.json -t 25s -c 30
-```
-
-Check proxies and save working ones to a separate file:
-```bash
-./proxyhawk -l proxies.txt -wp working_proxies.txt
-```
-
-Check proxies and save working anonymous ones to a separate file:
-```bash
-./proxyhawk -l proxies.txt -wpa working_anonymous_proxies.txt
-```
-
-Check proxies with rate limiting to avoid IP bans:
-```bash
-./proxyhawk -l proxies.txt -rate-limit -rate-delay 2s
-```
-
-Test proxies with HTTP/2 and HTTP/3 support:
-```bash
-./proxyhawk -l proxies.txt -http2 -http3 -v
-```
-
-Run with hot-reloading config (for long-running checks):
-```bash
-./proxyhawk -l proxies.txt -hot-reload -config custom_config.yaml
-```
-
-Use granular per-proxy rate limiting (slowest but safest):
-```bash
-./proxyhawk -l proxies.txt -rate-limit -rate-per-proxy -rate-delay 3s
-```
-
-Run in automation mode with custom progress indicator:
-```bash
-./proxyhawk -l proxies.txt -no-ui -progress spinner -o results.txt
-```
-
-Enable metrics for monitoring:
-```bash
-./proxyhawk -l proxies.txt -metrics -metrics-addr :9090
-```
-
-### Check Mode Examples
-
-Basic mode (connectivity only, fastest):
-```bash
-./proxyhawk -l proxies.txt -mode basic -c 50
-```
-
-Intense mode (core security checks, balanced):
-```bash
-./proxyhawk -l proxies.txt -mode intense -c 20 -t 15s
-```
-
-Vulnerability scanning mode (comprehensive, slowest):
-```bash
-./proxyhawk -l proxies.txt -mode vulns -c 10 -t 30s -d
-```
-
-Override mode with explicit advanced checks:
-```bash
-./proxyhawk -l proxies.txt -advanced -t 25s
-```
-
-Enable Interactsh for out-of-band vulnerability confirmation:
-```bash
-# With intense mode (recommended for anonymity testing)
-./proxyhawk -l proxies.txt -mode intense -interactsh
-
-# With vulns mode (recommended for full vulnerability testing)
-./proxyhawk -l proxies.txt -mode vulns -interactsh -d
-```
-
-### Discovery Mode Examples
-
-Discover proxies using Shodan (requires API key):
-```bash
+# Discover proxies from Shodan
 ./proxyhawk -discover -discover-source shodan -discover-limit 50
 ```
 
-Discover proxies using Censys (requires API credentials):
-```bash
-./proxyhawk -discover -discover-source censys -discover-limit 100 -v
-```
+## Command-Line Arguments
 
-Discover proxies from free lists (no API key required):
-```bash
-./proxyhawk -discover -discover-source freelists -discover-limit 200
-```
+### Core Options
+- `-l` - File with proxy list (one per line)
+- `-host` - Single proxy to test (IP or hostname)
+- `-cidr` - CIDR range to test
+- `-config` - Config file path (default: config/default.yaml)
+- `-c` - Concurrent checks (default: 10)
+- `-t` - Timeout (default: 10s)
+- `-v` - Verbose output
+- `-d` - Debug mode
 
-Discover proxies using web scraping (no API key required):
-```bash
-./proxyhawk -discover -discover-source webscraper -discover-limit 150
-```
+### Security Testing
+- `-mode` - Check mode: `basic` (connectivity), `intense` (security), `vulns` (comprehensive)
+- `-advanced` - Enable all security checks
+- `-fingerprint` - Enable proxy fingerprinting
+- `-path-fingerprint` - Path-based fingerprinting mode
+- `-interactsh` - Enable out-of-band detection
 
-Discover from all available sources:
-```bash
-./proxyhawk -discover -discover-source all -discover-limit 500 -v
-```
+### Output Options
+- `-o` - Save results to text file
+- `-j` - Save results to JSON file
+- `-wp` - Save working proxies only
+- `-wpa` - Save anonymous proxies only
+- `-no-ui` - Disable terminal UI
 
-Discover and validate proxies from specific countries:
-```bash
-./proxyhawk -discover -discover-countries "US,GB,DE" -discover-validate -o discovered.txt
-```
+### Discovery Options
+- `-discover` - Enable discovery mode
+- `-discover-source` - Source: `shodan`, `censys`, `freelists`, `webscraper`, `all`
+- `-discover-limit` - Max candidates (default: 100)
+- `-discover-validate` - Validate discovered proxies
+- `-discover-countries` - Filter by countries (e.g., "US,GB,DE")
 
-Custom discovery query with confidence filtering:
-```bash
-./proxyhawk -discover -discover-query "squid proxy" -discover-min-confidence 0.7 -j results.json
-```
+### Rate Limiting
+- `-rate-limit` - Enable rate limiting
+- `-rate-delay` - Delay between requests (default: 1s)
+- `-rate-per-host` - Per-host rate limiting
+- `-rate-per-proxy` - Per-proxy rate limiting
 
-Discover high-quality proxies and save working ones:
-```bash
-./proxyhawk -discover -discover-limit 200 -discover-validate -wp working-discovered.txt -v
-```
+## Common Examples
 
-Discover proxies by specific source with validation:
 ```bash
-./proxyhawk -discover -discover-source censys -discover-query "services.service_name: http and services.port: 3128" -discover-validate -o censys-proxies.txt
-```
+# Quick connectivity test
+./proxyhawk -l proxies.txt
 
-### Path-Based Fingerprinting Examples
+# Security testing with fingerprinting
+./proxyhawk -l proxies.txt -mode intense -fingerprint -v
 
-Test reverse proxy or API gateway (default paths):
-```bash
+# Comprehensive vulnerability scan
+./proxyhawk -l proxies.txt -mode vulns -d -o results.txt -j results.json
+
+# Discover and validate proxies
+./proxyhawk -discover -discover-validate -wp working.txt
+
+# Test reverse proxy/API gateway
 ./proxyhawk -path-fingerprint -host http://api.example.com
-./proxyhawk -path-fingerprint -host https://gateway.k8s.local
+
+# Test with rate limiting
+./proxyhawk -l proxies.txt -rate-limit -rate-delay 2s
+
+# Automation mode
+./proxyhawk -l proxies.txt -no-ui -progress bar -o results.txt
 ```
 
-Test Kubernetes Ingress or Nginx gateway:
-```bash
-./proxyhawk -path-fingerprint -host http://10.176.17.250
+## Check Modes
+
+| Mode | Speed | Tests | Use Case |
+|------|-------|-------|----------|
+| **basic** | Fast (~2s) | Connectivity only | Quick validation |
+| **intense** | Medium (~10s) | Core security checks | Production vetting |
+| **vulns** | Slow (~2.5min) | 154 advanced tests | Comprehensive audit |
+
+## Configuration
+
+Create `config.yaml` with your settings:
+
+```yaml
+# Discovery API credentials
+discovery:
+  shodan_api_key: "YOUR_KEY"
+  censys_api_key: "YOUR_KEY"
+  censys_secret: "YOUR_SECRET"
+
+# Security testing
+advanced_checks:
+  test_ssrf: true
+  test_host_header_injection: true
+  test_protocol_smuggling: true
+
+# Rate limiting
+rate_limit_enabled: true
+rate_limit_delay: "1s"
 ```
 
-Test with custom paths:
-```bash
-./proxyhawk -path-fingerprint -host http://api.example.com -paths "/,/api,/admin,/health,/status"
+**⚠️ Security**: Never commit API keys to git. See [SECURITY_NOTICE.md](SECURITY_NOTICE.md) for safe practices.
+
+## Output Formats
+
+### Text Output
+```
+✅ http://proxy.example.com:8080 - 1.5s - Anonymous (Elite) - US
+🔒 http://secure-proxy.com:3128 - 2.1s - Anonymous - GB
+☁️ http://aws-proxy.com:8080 - 1.8s - AWS - US-EAST-1
+❌ http://dead-proxy.com:8080 - Failed (timeout)
 ```
 
-Test and save results to files:
-```bash
-./proxyhawk -path-fingerprint -host http://gateway.local -o path-results.txt -j path-results.json
-```
-
-Test with increased timeout:
-```bash
-./proxyhawk -path-fingerprint -host http://api.example.com -t 30
-```
-
-**Path-based fingerprinting mode features:**
-- Tests 20 default paths: /, /admin, /api, /v1, /v2, /api/v1, /api/v2, /health, /status, /metrics, /internal, /debug, /console, /dashboard, /management, /actuator, /swagger, /graphql, /ws, /websocket
-- Detects proxy software even when Server header is hidden (common security hardening)
-- Identifies backend routing patterns and rewrite configurations
-- Compares headers across paths to detect multi-backend setups
-- Detects backend frameworks (Django, Flask, Spring, Rails, ASP.NET, etc.)
-- Identifies suspicious header differences indicating backend routing
-- Works with reverse proxies, API gateways, and Kubernetes Ingress controllers
-
-Disable honeypot filtering (not recommended):
-```bash
-./proxyhawk -discover -discover-source shodan -discover-no-honeypot-filter -discover-limit 50
-```
-
-Enable verbose logging to see honeypot filtering in action:
-```bash
-./proxyhawk -discover -discover-source all -discover-limit 100 -v
-```
-
-### Check Modes
-
-ProxyHawk supports three check modes to balance speed and thoroughness:
-
-| Mode | Description | Tests Included | Performance | Use Case |
-|------|-------------|----------------|-------------|----------|
-| **basic** | Connectivity only | Connection validation, response validation | Fastest (~1-2s per proxy) | Quick proxy list validation, high-volume testing |
-| **intense** | Core security checks | Basic + SSRF, Host Header Injection, Protocol Smuggling, IPv6, Anonymity Detection, Chain Detection | Moderate (~5-10s per proxy) | Production proxy vetting, security-conscious deployments |
-| **vulns** | Full vulnerability scanning | Intense + DNS Rebinding, Cache Poisoning, Extended SSRF (60+ targets) | Slowest (~15-30s per proxy) | Security research, comprehensive auditing |
-
-**Test Coverage by Mode:**
-
-- **Basic Mode**:
-  - ✅ Connectivity validation
-  - ✅ Response validation
-  - ✅ Protocol detection
-  - ✅ Basic anonymity detection
-  - ❌ Advanced security checks disabled
-
-- **Intense Mode**:
-  - ✅ All basic mode checks
-  - ✅ SSRF testing (core targets)
-  - ✅ Host Header Injection detection
-  - ✅ Protocol Smuggling detection
-  - ✅ IPv6 testing
-  - ✅ Enhanced anonymity detection (10+ headers)
-  - ✅ Proxy chain detection
-  - ⚠️ DNS Rebinding disabled (slow)
-  - ⚠️ Cache Poisoning disabled (slow)
-
-- **Vulns Mode**:
-  - ✅ All intense mode checks
-  - ✅ DNS Rebinding testing
-  - ✅ Cache Poisoning testing
-  - ✅ Extended SSRF testing (60+ targets including cloud metadata)
-  - ✅ Comprehensive security audit
-
-**Anonymity Detection (All Modes):**
-All modes include basic anonymity detection. Intense and Vulns modes include enhanced detection with:
-- 10+ header leak checks (X-Forwarded-For, Via, X-Real-IP, etc.)
-- IP extraction from leaked headers
-- Proxy chain detection via Via and X-Forwarded-For analysis
-- Classification: Elite, Anonymous, Transparent, Compromised, Unknown
-
-### Output Formats
-
-#### Text Output (-o)
-The text output file includes:
-- Status icons for each proxy:
-  - ✅ Working proxy
-  - 🔒 Anonymous proxy  
-  - ☁️ Cloud provider proxy
-  - ⚠️ Security vulnerability detected
-  - 🚨 Internal network access possible
-  - ❌ Failed proxy
-- Response time and performance metrics
-- IP information and geolocation when available
-- Cloud provider classification
-- Security vulnerability details (SSRF, host header injection, etc.)
-- Protocol support information (HTTP/HTTPS/SOCKS)
-- Timestamp of each check
-- Comprehensive summary statistics
-
-#### JSON Output (-j)
-The JSON output includes a structured format with:
+### JSON Output
 ```json
 {
-  "total_proxies": 10,
-  "working_proxies": 5,
-  "interactsh_proxies": 3,
+  "total_proxies": 4,
+  "working_proxies": 3,
   "anonymous_proxies": 2,
-  "cloud_proxies": 1,
-  "internal_access_count": 0,
-  "success_rate": 50.0,
-  "results": [
-    {
-      "proxy": "http://example.com:8080",
-      "working": true,
-      "speed_ns": 1500000000,
-      "interactsh_test": true,
-      "real_ip": "1.2.3.4",
-      "proxy_ip": "5.6.7.8",
-      "is_anonymous": true,
-      "anonymity_level": "elite",
-      "detected_ip": "",
-      "leaking_headers": [],
-      "proxy_chain_detected": false,
-      "proxy_chain_info": "",
-      "cloud_provider": "AWS",
-      "internal_access": false,
-      "metadata_access": false,
-      "timestamp": "2024-02-13T02:05:45Z",
-      "security_checks": {
-        "ssrf_vulnerability": false,
-        "host_header_injection": false,
-        "protocol_smuggling": false,
-        "dns_rebinding": false,
-        "internal_network_access": false,
-        "cloud_metadata_access": false,
-        "vulnerability_details": {
-          "detected_issues": [],
-          "internal_targets_accessible": [],
-          "malformed_requests_accepted": false
-        }
-      },
-      "protocol_support": {
-        "http": true,
-        "https": true,
-        "socks4": false,
-        "socks5": false
-      }
-    }
-  ]
+  "success_rate": 75.0,
+  "results": [...]
 }
 ```
 
-**New Fields in JSON Output:**
-- `anonymity_level`: Classification (elite/anonymous/transparent/compromised/unknown)
-- `detected_ip`: IP address detected during anonymity check (if any leak found)
-- `leaking_headers`: Array of headers that leaked information
-- `proxy_chain_detected`: Boolean indicating if proxy-behind-proxy was detected
-- `proxy_chain_info`: Details about detected proxy chain
+## Advanced SSRF Detection (v1.6.0)
 
-## Building
+ProxyHawk includes **154 advanced SSRF test cases** covering:
+
+**Priority 1** (92 tests): URL parser differentials, IP obfuscation, redirect chains, protocol smuggling, header injection, proxy_pass traversal, host header SSRF
+
+**Priority 2** (22 tests): SNI proxy routing, DNS rebinding, HTTP/2 header injection, AWS IMDSv2 bypass
+
+**Priority 3** (40 tests): URL encoding bypass, multiple Host headers, cloud-specific headers, port tricks, fragment/query manipulation
+
+See [docs/DETAILED_README.md](docs/DETAILED_README.md) for complete vulnerability coverage.
+
+## Documentation
+
+- [Detailed README](docs/DETAILED_README.md) - Complete feature documentation
+- [Security Research](docs/SECURITY_RESEARCH_ANALYSIS.md) - SSRF vulnerability analysis
+- [Implementation Status](docs/IMPLEMENTATION_STATUS.md) - Feature checklist
+- [API Key Security](SECURITY_NOTICE.md) - Safe configuration practices
+- [Development Guide](CLAUDE.md) - Contributing and development
+
+## Testing
 
 ```bash
-go build -o proxyhawk
+# Run all tests
+make test
+
+# Run with coverage
+make test-coverage
+
+# Run linter
+make lint
 ```
 
 ## Requirements
 
-- Go 1.21 or later
-- Internet connection for proxy checking
-- Valid proxy list in supported format
+- Go 1.23+
+- Optional: Shodan/Censys API keys for discovery
 
-## Testing
+## Credits
 
-The project includes a comprehensive test suite located in the `tests` directory. The tests cover:
+Shout out to [@geeknik](https://github.com/geeknik) for the name and [@nullenc0de](https://github.com/nullenc0de) for the support!
 
-- Basic proxy validation
-- Advanced security checks
-- Output formatting
-- Configuration loading
-- Working proxies output
+## License
 
-### Running Tests
-
-Run all tests:
-```bash
-make test
-```
-
-Run tests with coverage report:
-```bash
-make coverage
-```
-
-Run a specific test:
-```bash
-make test-one test=TestName
-```
-
-Run tests in verbose mode:
-```bash
-make test-verbose
-```
-
-Run short tests (skip long-running tests):
-```bash
-make test-short
-```
-
-### Test Structure
-
-- `tests/proxy_test.go`: Tests for basic proxy validation
-- `tests/security_test.go`: Tests for advanced security checks
-- `tests/output_test.go`: Tests for output formatting
-- `tests/config_test.go`: Tests for configuration loading
-- `tests/working_proxies_test.go`: Tests for working proxies output
-- `tests/types.go`: Common types used in tests
-- `tests/init_test.go`: Test environment setup and cleanup
-
-### Linting
-
-The project uses golangci-lint for code quality checks. Run linting:
-```bash
-make lint
-```
-
-Linting configuration is in `.golangci.yml` and includes:
-- Code formatting (gofmt)
-- Code simplification (gosimple)
-- Error checking (errcheck)
-- Security checks (gosec)
-- And many more... 
-
-Shout out to @geeknik for helping me with the name and @nullenc0de for helping as well!!
+MIT License - see [LICENSE](LICENSE) file for details.

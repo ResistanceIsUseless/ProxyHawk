@@ -45,6 +45,13 @@ vendor/
 .env
 *.env.local
 
+# Config files with API keys/secrets (user-specific configs)
+**/config/**/config.yaml
+!config/examples/*.yaml
+!config/client/default.yaml
+*-config.yaml
+**/proxyhawk/config.yaml
+
 # Go workspace file
 go.work
 

@@ -11,7 +11,7 @@ import (
 // TestExtractAuthFromURL tests authentication extraction from URLs
 func TestExtractAuthFromURL(t *testing.T) {
 	config := Config{}
-	checker := NewChecker(config, false)
+	checker := NewChecker(config, false, nil)
 
 	tests := []struct {
 		name          string
@@ -149,7 +149,7 @@ func TestGetProxyAuth(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			checker := NewChecker(tt.config, false)
+			checker := NewChecker(tt.config, false, nil)
 			result := &ProxyResult{}
 
 			parsedURL, err := url.Parse(tt.proxyURL)
@@ -184,7 +184,7 @@ func TestGetProxyAuth(t *testing.T) {
 // TestCleanProxyURL tests URL cleaning for logging
 func TestCleanProxyURL(t *testing.T) {
 	config := Config{}
-	checker := NewChecker(config, false)
+	checker := NewChecker(config, false, nil)
 
 	tests := []struct {
 		name        string
@@ -234,7 +234,7 @@ func TestCreateAuthenticatedHTTPTransport(t *testing.T) {
 	config := Config{
 		Timeout: 30 * time.Second,
 	}
-	checker := NewChecker(config, false)
+	checker := NewChecker(config, false, nil)
 	result := &ProxyResult{}
 
 	tests := []struct {
@@ -375,7 +375,7 @@ func TestValidateAuthConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			checker := NewChecker(tt.config, false)
+			checker := NewChecker(tt.config, false, nil)
 
 			if checker.config.AuthEnabled != tt.expectedEnabled {
 				t.Errorf("Expected AuthEnabled %v, got %v", tt.expectedEnabled, checker.config.AuthEnabled)
@@ -426,7 +426,7 @@ func TestTestProxyAuth(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			checker := NewChecker(config, true) // Enable debug
+			checker := NewChecker(config, true, nil) // Enable debug
 			result := &ProxyResult{DebugInfo: ""}
 
 			// Create a simple HTTP client for testing
@@ -463,7 +463,7 @@ func TestAuthIntegration(t *testing.T) {
 		ValidationURL:   "https://httpbin.org/ip",
 	}
 
-	checker := NewChecker(config, true)
+	checker := NewChecker(config, true, nil)
 
 	// Test with a non-existent authenticated proxy (will fail but test the flow)
 	result := checker.Check("http://authenticated-proxy.example.com:8080")
@@ -482,7 +482,7 @@ func TestAuthIntegration(t *testing.T) {
 // Benchmark tests for authentication performance
 func BenchmarkExtractAuthFromURL(b *testing.B) {
 	config := Config{}
-	checker := NewChecker(config, false)
+	checker := NewChecker(config, false, nil)
 	proxyURL, _ := url.Parse("http://user:password@proxy.example.com:8080")
 
 	b.ResetTimer()
@@ -497,7 +497,7 @@ func BenchmarkGetProxyAuth(b *testing.B) {
 		DefaultUsername: "user",
 		DefaultPassword: "pass",
 	}
-	checker := NewChecker(config, false)
+	checker := NewChecker(config, false, nil)
 	proxyURL, _ := url.Parse("http://proxy.example.com:8080")
 	result := &ProxyResult{}
 
@@ -509,7 +509,7 @@ func BenchmarkGetProxyAuth(b *testing.B) {
 
 func BenchmarkCleanProxyURL(b *testing.B) {
 	config := Config{}
-	checker := NewChecker(config, false)
+	checker := NewChecker(config, false, nil)
 	proxyURL, _ := url.Parse("http://user:password@proxy.example.com:8080")
 
 	b.ResetTimer()

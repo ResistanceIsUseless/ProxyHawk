@@ -51,7 +51,7 @@ func TestAdvancedChecks(t *testing.T) {
 			},
 		}
 
-		checker := proxy.NewChecker(checkerConfig, true)
+		checker := proxy.NewChecker(checkerConfig, true, nil)
 		if checker == nil {
 			t.Error("Should be able to create checker with advanced checks")
 		}

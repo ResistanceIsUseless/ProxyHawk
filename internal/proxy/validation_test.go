@@ -153,7 +153,7 @@ func TestValidateResponseEdgeCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			checker := NewChecker(tt.config, false)
+			checker := NewChecker(tt.config, false, nil)
 			resp := &http.Response{StatusCode: tt.statusCode}
 			body := []byte(tt.body)
 
@@ -169,7 +169,7 @@ func TestValidateResponseEdgeCases(t *testing.T) {
 func TestRateLimitingEdgeCases(t *testing.T) {
 	t.Run("Rate limiting disabled", func(t *testing.T) {
 		config := Config{RateLimitEnabled: false}
-		checker := NewChecker(config, false)
+		checker := NewChecker(config, false, nil)
 		result := &ProxyResult{}
 
 		start := time.Now()
@@ -187,7 +187,7 @@ func TestRateLimitingEdgeCases(t *testing.T) {
 			RateLimitDelay:   0,
 			RateLimitPerHost: true,
 		}
-		checker := NewChecker(config, false)
+		checker := NewChecker(config, false, nil)
 		result := &ProxyResult{}
 
 		// First call
@@ -209,7 +209,7 @@ func TestRateLimitingEdgeCases(t *testing.T) {
 			RateLimitDelay:   50 * time.Millisecond,
 			RateLimitPerHost: false, // Global rate limiting
 		}
-		checker := NewChecker(config, false)
+		checker := NewChecker(config, false, nil)
 		result := &ProxyResult{}
 
 		// First call
@@ -231,7 +231,7 @@ func TestRateLimitingEdgeCases(t *testing.T) {
 			RateLimitDelay:   10 * time.Millisecond,
 			RateLimitPerHost: true,
 		}
-		checker := NewChecker(config, true) // Enable debug
+		checker := NewChecker(config, true, nil) // Enable debug
 		result := &ProxyResult{DebugInfo: ""}
 
 		// First call
@@ -260,7 +260,7 @@ func TestPerProxyRateLimitingEdgeCases(t *testing.T) {
 			RateLimitDelay:    50 * time.Millisecond,
 			RateLimitPerProxy: true,
 		}
-		checker := NewChecker(config, false)
+		checker := NewChecker(config, false, nil)
 		result := &ProxyResult{DebugInfo: ""}
 
 		// Should not crash with empty proxy URL
@@ -279,7 +279,7 @@ func TestPerProxyRateLimitingEdgeCases(t *testing.T) {
 			RateLimitDelay:    50 * time.Millisecond,
 			RateLimitPerProxy: true,
 		}
-		checker := NewChecker(config, false)
+		checker := NewChecker(config, false, nil)
 		result1 := &ProxyResult{DebugInfo: ""}
 		result2 := &ProxyResult{DebugInfo: ""}
 
@@ -302,7 +302,7 @@ func TestPerProxyRateLimitingEdgeCases(t *testing.T) {
 			RateLimitDelay:    50 * time.Millisecond,
 			RateLimitPerProxy: true,
 		}
-		checker := NewChecker(config, false)
+		checker := NewChecker(config, false, nil)
 		result1 := &ProxyResult{DebugInfo: ""}
 		result2 := &ProxyResult{DebugInfo: ""}
 
@@ -327,7 +327,7 @@ func TestRateLimitingConcurrency(t *testing.T) {
 		RateLimitDelay:   10 * time.Millisecond,
 		RateLimitPerHost: true,
 	}
-	checker := NewChecker(config, false)
+	checker := NewChecker(config, false, nil)
 
 	const numGoroutines = 10
 	results := make(chan time.Duration, numGoroutines)
@@ -363,7 +363,7 @@ func TestValidateResponsePerformance(t *testing.T) {
 		MinResponseBytes:   100,
 		DisallowedKeywords: []string{"error", "denied", "blocked", "forbidden", "timeout"},
 	}
-	checker := NewChecker(config, false)
+	checker := NewChecker(config, false, nil)
 
 	// Create large response body
 	largeBody := make([]byte, 100000) // 100KB
@@ -393,7 +393,7 @@ func TestRateLimiterMemoryUsage(t *testing.T) {
 		RateLimitDelay:   1 * time.Millisecond,
 		RateLimitPerHost: true,
 	}
-	checker := NewChecker(config, false)
+	checker := NewChecker(config, false, nil)
 
 	// Add many different hosts to rate limiter
 	result := &ProxyResult{}
@@ -422,7 +422,7 @@ func TestRateLimitingTimePrecision(t *testing.T) {
 		RateLimitDelay:   5 * time.Millisecond, // Very short delay
 		RateLimitPerHost: true,
 	}
-	checker := NewChecker(config, false)
+	checker := NewChecker(config, false, nil)
 	result := &ProxyResult{}
 
 	// First call

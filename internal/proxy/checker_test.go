@@ -22,7 +22,7 @@ func TestNewChecker(t *testing.T) {
 		UserAgent:          "ProxyHawk-Test/1.0",
 	}
 
-	checker := NewChecker(config, true)
+	checker := NewChecker(config, true, nil)
 
 	if checker == nil {
 		t.Fatal("NewChecker returned nil")
@@ -51,7 +51,7 @@ func TestValidateResponse(t *testing.T) {
 		DisallowedKeywords: []string{"Access Denied", "Error"},
 		MinResponseBytes:   10,
 	}
-	checker := NewChecker(config, false)
+	checker := NewChecker(config, false, nil)
 
 	tests := []struct {
 		name           string
@@ -120,7 +120,7 @@ func TestDetermineProxyType(t *testing.T) {
 		MinResponseBytes:   5,
 		UserAgent:          "ProxyHawk-Test/1.0",
 	}
-	checker := NewChecker(config, true)
+	checker := NewChecker(config, true, nil)
 
 	tests := []struct {
 		name        string
@@ -184,7 +184,7 @@ func TestRateLimiting(t *testing.T) {
 		RateLimitDelay:   100 * time.Millisecond,
 		RateLimitPerHost: true,
 	}
-	checker := NewChecker(config, true)
+	checker := NewChecker(config, true, nil)
 
 	result := &ProxyResult{DebugInfo: ""}
 
@@ -223,7 +223,7 @@ func TestPerProxyRateLimiting(t *testing.T) {
 		RateLimitDelay:    100 * time.Millisecond,
 		RateLimitPerProxy: true,
 	}
-	checker := NewChecker(config, true)
+	checker := NewChecker(config, true, nil)
 
 	result1 := &ProxyResult{ProxyURL: "http://proxy1.example.com:8080", DebugInfo: ""}
 	result2 := &ProxyResult{ProxyURL: "http://proxy2.example.com:8080", DebugInfo: ""}
@@ -272,7 +272,7 @@ func TestAdvancedChecksConfiguration(t *testing.T) {
 		InteractshToken: "test-token",
 	}
 
-	checker := NewChecker(config, false)
+	checker := NewChecker(config, false, nil)
 
 	if !checker.config.AdvancedChecks.TestProtocolSmuggling {
 		t.Error("Expected TestProtocolSmuggling to be enabled")
@@ -316,7 +316,7 @@ func TestCloudProviderConfiguration(t *testing.T) {
 		},
 	}
 
-	checker := NewChecker(config, false)
+	checker := NewChecker(config, false, nil)
 
 	if !checker.config.EnableCloudChecks {
 		t.Error("Expected EnableCloudChecks to be true")
@@ -475,7 +475,7 @@ func TestConfigValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			checker := NewChecker(tt.config, false)
+			checker := NewChecker(tt.config, false, nil)
 			if checker == nil && tt.isValid {
 				t.Error("Expected valid config to create checker")
 			}
@@ -494,13 +494,13 @@ func TestDebugMode(t *testing.T) {
 	}
 
 	// Test with debug enabled
-	debugChecker := NewChecker(config, true)
+	debugChecker := NewChecker(config, true, nil)
 	if !debugChecker.debug {
 		t.Error("Expected debug mode to be enabled")
 	}
 
 	// Test with debug disabled
-	normalChecker := NewChecker(config, false)
+	normalChecker := NewChecker(config, false, nil)
 	if normalChecker.debug {
 		t.Error("Expected debug mode to be disabled")
 	}
@@ -519,7 +519,7 @@ func TestConnectionPoolIntegration(t *testing.T) {
 		ConnectionPool: mockPool,
 	}
 
-	checker := NewChecker(config, false)
+	checker := NewChecker(config, false, nil)
 
 	if checker.config.ConnectionPool == nil {
 		t.Error("Expected connection pool to be set")
@@ -562,7 +562,7 @@ func BenchmarkValidateResponse(b *testing.B) {
 		DisallowedKeywords: []string{"Access Denied", "Error", "Forbidden"},
 		MinResponseBytes:   50,
 	}
-	checker := NewChecker(config, false)
+	checker := NewChecker(config, false, nil)
 
 	resp := &http.Response{StatusCode: 200}
 	body := []byte(`{"ip": "192.168.1.100", "country": "US", "region": "California"}`)
@@ -579,7 +579,7 @@ func BenchmarkRateLimiting(b *testing.B) {
 		RateLimitDelay:   1 * time.Millisecond,
 		RateLimitPerHost: true,
 	}
-	checker := NewChecker(config, false)
+	checker := NewChecker(config, false, nil)
 	result := &ProxyResult{}
 
 	b.ResetTimer()
